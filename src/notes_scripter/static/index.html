@@ -51,16 +51,16 @@
   }
   .actions { display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; }
   .action {
-    flex: 1 1 240px; display: flex; flex-direction: column; align-items: center; gap: .8rem;
-    padding: 2rem 1.2rem; border: 1.5px dashed var(--border); border-radius: 14px;
+    flex: 1 1 200px; display: flex; flex-direction: column; align-items: center; gap: .8rem;
+    padding: 1.6rem 1rem; border: 1.5px dashed var(--border); border-radius: 14px;
     background: transparent; color: var(--text); cursor: pointer;
-    transition: border-color .15s, background .15s; font-size: 1rem;
+    transition: border-color .15s, background .15s; font-size: 1rem; text-align: center;
   }
   .action:hover, .action.dragover {
     border-color: var(--accent);
     background: color-mix(in srgb, var(--accent) 6%, transparent);
   }
-  .action .icon { font-size: 2.2rem; }
+  .action .icon { font-size: 2rem; }
   .action small { color: var(--muted); }
   .btn {
     display: inline-flex; align-items: center; gap: .5rem;
@@ -71,6 +71,7 @@
   .btn:hover { background: var(--accent-hover); }
   .btn.secondary { background: transparent; color: var(--accent); border: 1.5px solid var(--accent); }
   .btn.danger { background: var(--danger); }
+  .btn:disabled { opacity: .5; cursor: default; }
   .center { display: flex; flex-direction: column; align-items: center; gap: 1.2rem; text-align: center; }
   .rec-dot {
     width: 14px; height: 14px; border-radius: 50%; background: var(--danger);
@@ -147,6 +148,11 @@
           <span><strong>Record</strong></span>
           <small>Use the microphone</small>
         </button>
+        <button class="action" @click="startLive">
+          <span class="icon">🔴</span>
+          <span><strong>Live session</strong></span>
+          <small>Watch the score appear as you play (~10 s behind)</small>
+        </button>
         <label class="action" :class="{ dragover: dragging }"
                @dragover.prevent="dragging = true" @dragleave="dragging = false"
                @drop.prevent="onDrop">
@@ -170,6 +176,27 @@
       <div class="timer">{{ timerLabel }}</div>
       <p class="hint">Play your piece, then stop when you're done.</p>
       <button class="btn danger" @click="stopRecording">■ Stop &amp; transcribe</button>
+    </div>
+
+    <!-- live -->
+    <div v-else-if="state === 'live'">
+      <div class="card center">
+        <div style="display:flex; align-items:center; gap:.7rem">
+          <span class="rec-dot"></span><strong>Live session</strong>
+        </div>
+        <div class="timer">{{ timerLabel }}</div>
+        <p class="hint">
+          The draft updates in 10-second blocks ({{ liveNotes }} notes so far).
+          Stopping runs a final {{ currentEffort.name.toLowerCase() }}-quality pass.
+        </p>
+        <button class="btn danger" @click="stopLive">■ Stop &amp; finalize</button>
+      </div>
+      <div class="pages" v-if="liveSvgs.length">
+        <div class="page" v-for="(svg, i) in liveSvgs" :key="i" v-html="svg"></div>
+      </div>
+      <p class="hint" style="text-align:center; margin-top:1.4rem" v-else>
+        🎧 Listening… the first notes appear after ~10 seconds of playing.
+      </p>
     </div>
 
     <!-- processing -->
@@ -197,6 +224,7 @@
           <button class="btn secondary" @click="reset">↺ New transcription</button>
         </div>
       </div>
+
       <div class="pages">
         <div class="page" v-for="(svg, i) in result.svg_pages" :key="i" v-html="svg"></div>
       </div>
@@ -213,7 +241,7 @@ const { createApp } = Vue;
 createApp({
   data() {
     return {
-      state: "idle",       // idle | recording | processing | done
+      state: "idle",       // idle | recording | live | processing | done
       effort: "balanced",
       efforts: [
         { id: "fast", icon: "⚡", name: "Fast", hint: "About twice as fast — good for a quick draft." },
@@ -227,6 +255,11 @@ createApp({
       chunks: [],
       seconds: 0,
       timerId: null,
+      liveId: null,
+      liveTimerId: null,
+      liveBusy: false,
+      liveSvgs: [],
+      liveNotes: 0,
     };
   },
   computed: {
@@ -252,29 +285,31 @@ createApp({
     dl(kind) {
       return `/api/download/${this.result.id}/${kind}`;
     },
+
+    // ---- plain recording ----
+    async getMic() {
+      return navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      });
+    },
+    startTimer() {
+      this.seconds = 0;
+      this.timerId = setInterval(() => this.seconds++, 1000);
+    },
     async startRecording() {
       this.error = null;
       let stream;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-        });
-      } catch {
-        this.error = "Microphone access was denied.";
-        return;
-      }
+      try { stream = await this.getMic(); }
+      catch { this.error = "Microphone access was denied."; return; }
       this.chunks = [];
       this.recorder = new MediaRecorder(stream);
       this.recorder.ondataavailable = (e) => e.data.size && this.chunks.push(e.data);
       this.recorder.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(this.chunks, { type: this.recorder.mimeType });
-        const ext = this.recorder.mimeType.includes("ogg") ? "ogg" : "webm";
-        this.transcribe(new File([blob], `recording.${ext}`));
+        this.transcribe(this.blobFile());
       };
       this.recorder.start();
-      this.seconds = 0;
-      this.timerId = setInterval(() => this.seconds++, 1000);
+      this.startTimer();
       this.state = "recording";
     },
     stopRecording() {
@@ -282,6 +317,59 @@ createApp({
       this.recorder.stop();
       this.state = "processing";
     },
+    blobFile() {
+      const blob = new Blob(this.chunks, { type: this.recorder.mimeType });
+      const ext = this.recorder.mimeType.includes("ogg") ? "ogg" : "webm";
+      return new File([blob], `recording.${ext}`);
+    },
+
+    // ---- live session ----
+    async startLive() {
+      this.error = null;
+      let stream;
+      try { stream = await this.getMic(); }
+      catch { this.error = "Microphone access was denied."; return; }
+      const resp = await fetch("/api/live/start", { method: "POST" });
+      this.liveId = (await resp.json()).id;
+      this.liveSvgs = [];
+      this.liveNotes = 0;
+      this.chunks = [];
+      this.recorder = new MediaRecorder(stream);
+      this.recorder.ondataavailable = (e) => e.data.size && this.chunks.push(e.data);
+      this.recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        fetch(`/api/live/${this.liveId}`, { method: "DELETE" });
+        this.transcribe(this.blobFile());
+      };
+      this.recorder.start(1000); // gather data every second
+      this.startTimer();
+      this.liveTimerId = setInterval(() => this.sendLiveChunk(), 8000);
+      this.state = "live";
+    },
+    async sendLiveChunk() {
+      if (this.liveBusy || !this.chunks.length || this.state !== "live") return;
+      this.liveBusy = true;
+      try {
+        const form = new FormData();
+        form.append("file", this.blobFile());
+        const resp = await fetch(`/api/live/${this.liveId}/chunk`, { method: "POST", body: form });
+        if (resp.ok && this.state === "live") {
+          const data = await resp.json();
+          if (data.svg_pages.length) this.liveSvgs = data.svg_pages;
+          this.liveNotes = data.n_notes;
+        }
+      } finally {
+        this.liveBusy = false;
+      }
+    },
+    stopLive() {
+      clearInterval(this.timerId);
+      clearInterval(this.liveTimerId);
+      this.recorder.stop(); // onstop triggers the final full-quality pass
+      this.state = "processing";
+    },
+
+    // ---- upload ----
     onPick(e) {
       const f = e.target.files[0];
       if (f) this.transcribe(f);

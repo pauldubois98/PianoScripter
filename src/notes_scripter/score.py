@@ -1,7 +1,9 @@
-"""Note events -> quantized two-staff score -> MusicXML (music21)."""
+"""Quantized, editable notes -> two-staff score -> MusicXML / MIDI (music21)."""
 
 from __future__ import annotations
 
+import copy
+from dataclasses import dataclass
 from pathlib import Path
 
 import structlog
@@ -13,46 +15,92 @@ from .transcribe import NoteEvent
 log = structlog.get_logger()
 
 HAND_SPLIT_PITCH = 60  # middle C: below -> left hand (bass clef)
-GRID = 0.25  # quantize onsets to sixteenth notes
+GRID = 0.25  # quantize onsets/durations to sixteenth notes
 MIN_QL = 0.25  # shortest written duration (quarterLength)
 MAX_QL = 8.0
 
 
-def _quantize(value: float, grid: float = GRID) -> float:
+@dataclass
+class QuantNote:
+    """One quantized note: the unit the score is built from."""
+
+    id: int
+    hand: str  # "R" (treble) | "L" (bass)
+    onset_ql: float
+    dur_ql: float
+    pitch: int
+    velocity: int
+
+
+def _snap(value: float, grid: float = GRID) -> float:
     return round(value / grid) * grid
 
 
-def _build_hand(notes: list[NoteEvent], bpm: float) -> stream.Part:
-    """Group quantized-simultaneous notes into chords and lay them on a Part."""
+def quantize(notes: list[NoteEvent], bpm: float) -> list[QuantNote]:
+    """Snap events to the grid, drop leading silence, group chords, clip overlaps."""
     sec_to_ql = bpm / 60.0
-    by_onset: dict[float, list[NoteEvent]] = {}
-    for n in notes:
-        by_onset.setdefault(_quantize(n.onset * sec_to_ql), []).append(n)
+    qnotes = [
+        QuantNote(
+            id=0,
+            hand="R" if n.pitch >= HAND_SPLIT_PITCH else "L",
+            onset_ql=_snap(n.onset * sec_to_ql),
+            dur_ql=max(MIN_QL, min(_snap((n.offset - n.onset) * sec_to_ql) or MIN_QL, MAX_QL)),
+            pitch=n.pitch,
+            velocity=n.velocity,
+        )
+        for n in notes
+    ]
+    if not qnotes:
+        return []
 
-    part = stream.Part()
-    onsets = sorted(by_onset)
-    for i, onset_ql in enumerate(onsets):
-        group = by_onset[onset_ql]
-        raw_ql = max((n.offset - n.onset) * sec_to_ql for n in group)
-        dur = max(MIN_QL, min(_quantize(raw_ql) or MIN_QL, MAX_QL))
-        # keep notation readable: clip a note that would overlap the next onset
-        if i + 1 < len(onsets):
-            gap = onsets[i + 1] - onset_ql
-            if dur > gap:
-                dur = max(MIN_QL, gap)
-        pitches = sorted({n.pitch for n in group})
+    # start the score on beat 1 (removes leading silence)
+    shift = min(q.onset_ql for q in qnotes)
+    for q in qnotes:
+        q.onset_ql -= shift
+
+    # drop duplicate pitches landing on the same beat
+    qnotes.sort(key=lambda q: (q.onset_ql, q.pitch))
+    seen: set[tuple] = set()
+    qnotes = [
+        q for q in qnotes if (k := (q.hand, q.onset_ql, q.pitch)) not in seen and not seen.add(k)
+    ]
+
+    # per hand: unify chord durations, then clip anything overlapping the next onset
+    for hand in "RL":
+        hand_notes = [q for q in qnotes if q.hand == hand]
+        onsets = sorted({q.onset_ql for q in hand_notes})
+        next_onset = dict(zip(onsets, onsets[1:]))
+        by_onset: dict[float, list[QuantNote]] = {}
+        for q in hand_notes:
+            by_onset.setdefault(q.onset_ql, []).append(q)
+        for onset, group in by_onset.items():
+            dur = max(q.dur_ql for q in group)
+            if onset in next_onset:
+                dur = max(MIN_QL, min(dur, next_onset[onset] - onset))
+            for q in group:
+                q.dur_ql = dur
+
+    for i, q in enumerate(qnotes):
+        q.id = i
+    return qnotes
+
+
+def build_score(
+    qnotes: list[QuantNote], bpm: float, title: str = "Transcription"
+) -> tuple[stream.Score, str | None]:
+    right, left = stream.Part(), stream.Part()
+    parts = {"R": right, "L": left}
+
+    # notes sharing (hand, onset, duration) render as one chord; other overlaps become voices
+    groups: dict[tuple, list[QuantNote]] = {}
+    for q in qnotes:
+        groups.setdefault((q.hand, q.onset_ql, q.dur_ql), []).append(q)
+    for (hand, onset, dur), group in groups.items():
+        pitches = sorted(q.pitch for q in group)
         el = note.Note(pitches[0]) if len(pitches) == 1 else m21chord.Chord(pitches)
         el.quarterLength = dur
-        el.volume.velocity = max(n.velocity for n in group)
-        part.insert(onset_ql, el)
-    return part
-
-
-def events_to_score(
-    notes: list[NoteEvent], bpm: float, title: str = "Transcription"
-) -> tuple[stream.Score, str | None]:
-    right = _build_hand([n for n in notes if n.pitch >= HAND_SPLIT_PITCH], bpm)
-    left = _build_hand([n for n in notes if n.pitch < HAND_SPLIT_PITCH], bpm)
+        el.volume.velocity = max(q.velocity for q in group)
+        parts[hand].insert(onset, el)
 
     right.insert(0, instrument.Piano())
     right.insert(0, clef.TrebleClef())
@@ -68,7 +116,7 @@ def events_to_score(
     score.insert(0, left)
 
     detected_key = None
-    if notes:
+    if qnotes:
         try:
             detected_key = score.analyze("key")
             for part in (right, left):
@@ -86,4 +134,12 @@ def events_to_score(
 
 def score_to_musicxml(score: stream.Score, path: Path) -> Path:
     score.write("musicxml", fp=str(path))
+    return path
+
+
+def score_to_midi(score: stream.Score, bpm: float, path: Path) -> Path:
+    """MIDI mirrors the (possibly edited) score; a real tempo mark sets playback speed."""
+    playable = copy.deepcopy(score)
+    playable.parts[0].insert(0, tempo.MetronomeMark(number=round(bpm)))
+    playable.write("midi", fp=str(path))
     return path

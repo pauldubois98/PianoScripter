@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import tempfile
+import threading
 import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import structlog
@@ -12,23 +14,57 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import pipeline
-from .transcribe import DEFAULT_EFFORT, EFFORT_HOP
+from . import pipeline, score, transcribe
+from .transcribe import DEFAULT_EFFORT, EFFORT_HOP, SAMPLE_RATE
 
 log = structlog.get_logger()
 
 STATIC_DIR = Path(__file__).parent / "static"
+LIVE_BLOCK_SAMPLES = SAMPLE_RATE * 10  # the model's native 10 s window
 
 app = FastAPI(title="NotesScripter", docs_url=None, redoc_url=None)
 
-_jobs: dict[str, pipeline.PipelineOutput] = {}
 _work_root = Path(tempfile.mkdtemp(prefix="notes-scripter-"))
+
+
+@dataclass
+class Job:
+    dir: Path
+    out: pipeline.PipelineOutput
+    effort: str
+    duration: float
+
+
+@dataclass
+class LiveSession:
+    dir: Path
+    processed_samples: int = 0
+    events: list[transcribe.NoteEvent] = field(default_factory=list)
+    bpm: float | None = None
+    svg_pages: list[str] = field(default_factory=list)
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+
+_jobs: dict[str, Job] = {}
+_live: dict[str, LiveSession] = {}
 
 _DOWNLOADS = {
     "midi": ("midi", "transcription.mid", "audio/midi"),
     "musicxml": ("musicxml", "transcription.musicxml", "application/vnd.recordare.musicxml+xml"),
     "pdf": ("pdf", "transcription.pdf", "application/pdf"),
 }
+
+
+def _job_payload(job_id: str, job: Job) -> dict:
+    return {
+        "id": job_id,
+        "effort": job.effort,
+        "svg_pages": job.out.svg_pages,
+        "tempo_bpm": job.out.tempo_bpm,
+        "key": job.out.key,
+        "n_notes": job.out.n_notes,
+        "duration": round(job.duration, 1),
+    }
 
 
 @app.post("/api/transcribe")
@@ -49,16 +85,8 @@ async def transcribe_endpoint(file: UploadFile, effort: str = Form(DEFAULT_EFFOR
         log.exception("job_failed", job=job_id)
         raise HTTPException(status_code=500, detail="Transcription failed") from None
 
-    _jobs[job_id] = out
-    return {
-        "id": job_id,
-        "effort": effort,
-        "svg_pages": out.svg_pages,
-        "tempo_bpm": out.tempo_bpm,
-        "key": out.key,
-        "n_notes": out.n_notes,
-        "duration": round(out.duration, 1),
-    }
+    _jobs[job_id] = Job(dir=job_dir, out=out, effort=effort, duration=out.duration)
+    return _job_payload(job_id, _jobs[job_id])
 
 
 @app.get("/api/download/{job_id}/{kind}")
@@ -66,8 +94,66 @@ async def download(job_id: str, kind: str):
     if job_id not in _jobs or kind not in _DOWNLOADS:
         raise HTTPException(status_code=404)
     attr, filename, media_type = _DOWNLOADS[kind]
-    path: Path = getattr(_jobs[job_id], attr)
+    path: Path = getattr(_jobs[job_id].out, attr)
     return FileResponse(path, filename=filename, media_type=media_type)
+
+
+@app.post("/api/live/start")
+async def live_start():
+    session_id = uuid.uuid4().hex[:12]
+    session_dir = _work_root / f"live-{session_id}"
+    session_dir.mkdir(parents=True)
+    _live[session_id] = LiveSession(dir=session_dir)
+    log.info("live_started", session=session_id)
+    return {"id": session_id}
+
+
+def _live_process(session: LiveSession, blob: bytes) -> None:
+    """Decode the full recording so far; transcribe any new complete 10 s blocks."""
+    audio_path = session.dir / "live.webm"
+    audio_path.write_bytes(blob)
+    audio = transcribe.load_audio(audio_path)
+    while len(audio) - session.processed_samples >= LIVE_BLOCK_SAMPLES:
+        start = session.processed_samples
+        block = audio[start : start + LIVE_BLOCK_SAMPLES]
+        notes, _ = transcribe.transcribe_array(block, effort="fast")
+        offset = start / SAMPLE_RATE
+        for n in notes:
+            session.events.append(
+                transcribe.NoteEvent(n.onset + offset, n.offset + offset, n.pitch, n.velocity)
+            )
+        session.processed_samples += LIVE_BLOCK_SAMPLES
+        if session.bpm is None:
+            session.bpm = transcribe.estimate_tempo(audio[: session.processed_samples])
+    if session.events:
+        qnotes = score.quantize(session.events, session.bpm or 120.0)
+        session.svg_pages = pipeline.draft_svgs(qnotes, session.bpm or 120.0, session.dir)
+
+
+@app.post("/api/live/{session_id}/chunk")
+async def live_chunk(session_id: str, file: UploadFile):
+    session = _live.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404)
+    blob = await file.read()
+    if session.lock.acquire(blocking=False):  # still busy? just return the current draft
+        try:
+            await run_in_threadpool(_live_process, session, blob)
+        except Exception:
+            log.exception("live_chunk_failed", session=session_id)
+        finally:
+            session.lock.release()
+    return {
+        "svg_pages": session.svg_pages,
+        "n_notes": len(session.events),
+        "processed_seconds": session.processed_samples / SAMPLE_RATE,
+    }
+
+
+@app.delete("/api/live/{session_id}")
+async def live_end(session_id: str):
+    _live.pop(session_id, None)
+    return {"ok": True}
 
 
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

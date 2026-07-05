@@ -12,9 +12,14 @@ uv sync
 uv run notes-scripter serve   # opens http://127.0.0.1:8321 in your browser
 ```
 
-Record from the microphone or drop an audio file (WAV, MP3, FLAC, OGG, WebM…). The first
-transcription downloads the model checkpoint (~165 MB) to
+Record from the microphone, start a **live session** (the score appears as you play,
+~10 s behind, with a full-quality pass when you stop), or drop an audio file
+(WAV, MP3, FLAC, OGG, WebM…). Leading/trailing silence is trimmed automatically.
+The first transcription downloads the model checkpoint (~165 MB) to
 `~/piano_transcription_inference_data/`; after that everything works offline.
+
+To touch up a transcription, download the MusicXML and open it in MuseScore or any
+notation editor.
 
 There is also a CLI:
 
@@ -50,11 +55,17 @@ how much the windows overlap and get averaged:
 
 Available in the UI (segmented control) and the CLI (`--effort fast|balanced|best`).
 
-- `src/notes_scripter/transcribe.py` — audio decoding (ffmpeg), tempo estimation, model inference
+- `src/notes_scripter/transcribe.py` — audio decoding (ffmpeg), silence trimming, tempo estimation, model inference
 - `src/notes_scripter/score.py` — 16th-note quantization, chord grouping, hand split at middle C, key detection
 - `src/notes_scripter/render.py` — MusicXML → SVG pages → PDF
-- `src/notes_scripter/server.py` — local FastAPI app + static UI (`static/index.html`, Vue 3 vendored)
+- `src/notes_scripter/pipeline.py` — orchestration: quantized notes → score → all exports
+- `src/notes_scripter/server.py` — local FastAPI app: transcription jobs, live sessions, static UI (Vue 3 vendored)
 - `src/notes_scripter/cli.py` — `serve` and `transcribe` commands
+
+Live mode records in the browser and posts the audio to `127.0.0.1` every few seconds;
+each complete 10-second block is transcribed once (fast tier) and the draft score is
+re-rendered. Stopping triggers a normal transcription of the whole take at your selected
+effort tier.
 
 ## Development
 

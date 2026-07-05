@@ -66,6 +66,12 @@ def load_audio(path: Path) -> np.ndarray:
     return audio
 
 
+def trim_silence(audio: np.ndarray) -> np.ndarray:
+    """Drop leading/trailing silence so the score starts on the first note."""
+    trimmed, _ = librosa.effects.trim(audio, top_db=35)
+    return trimmed
+
+
 def estimate_tempo(audio: np.ndarray) -> float:
     tempo, _ = librosa.beat.beat_track(y=audio, sr=SAMPLE_RATE)
     bpm = float(np.atleast_1d(tempo)[0])
@@ -130,17 +136,12 @@ def _postprocess(
     return note_events, pedal_events
 
 
-def transcribe(
-    audio_path: Path, midi_path: Path | None = None, effort: str = DEFAULT_EFFORT
-) -> TranscriptionResult:
-    """Run the full audio -> note-events step and optionally write raw performance MIDI."""
+def transcribe_array(
+    audio: np.ndarray, effort: str = DEFAULT_EFFORT, midi_path: Path | None = None
+) -> tuple[list[NoteEvent], list[dict]]:
+    """Audio samples (16 kHz mono) -> sorted note events + pedal events."""
     if effort not in EFFORT_HOP:
         raise ValueError(f"effort must be one of {sorted(EFFORT_HOP)}, got {effort!r}")
-    audio = load_audio(audio_path)
-    duration = len(audio) / SAMPLE_RATE
-    tempo = estimate_tempo(audio)
-    log.info("transcribing", duration_s=round(duration, 1), tempo_bpm=tempo, effort=effort)
-
     transcriptor = _get_transcriptor()
     output_dict = _run_model(transcriptor, audio, EFFORT_HOP[effort])
     note_events, pedal_events = _postprocess(transcriptor, output_dict, midi_path)
@@ -154,6 +155,21 @@ def transcribe(
         for e in note_events
     ]
     notes.sort(key=lambda n: (n.onset, n.pitch))
+    return notes, pedal_events
+
+
+def transcribe(
+    audio_path: Path, midi_path: Path | None = None, effort: str = DEFAULT_EFFORT
+) -> TranscriptionResult:
+    """Run the full audio -> note-events step and optionally write raw performance MIDI."""
+    if effort not in EFFORT_HOP:
+        raise ValueError(f"effort must be one of {sorted(EFFORT_HOP)}, got {effort!r}")
+    audio = trim_silence(load_audio(audio_path))
+    duration = len(audio) / SAMPLE_RATE
+    tempo = estimate_tempo(audio)
+    log.info("transcribing", duration_s=round(duration, 1), tempo_bpm=tempo, effort=effort)
+
+    notes, pedal_events = transcribe_array(audio, effort, midi_path)
     log.info("transcribed", n_notes=len(notes))
     return TranscriptionResult(
         notes=notes,
