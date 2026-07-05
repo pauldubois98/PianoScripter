@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import webbrowser
+from enum import Enum
 from pathlib import Path
 
 import structlog
@@ -31,17 +32,26 @@ def serve(
     uvicorn.run("notes_scripter.server:app", host="127.0.0.1", port=port, log_level="warning")
 
 
+class Effort(str, Enum):
+    fast = "fast"
+    balanced = "balanced"
+    best = "best"
+
+
 @app.command()
 def transcribe(
     audio: Path = typer.Argument(..., exists=True, help="Audio file (wav/mp3/flac/webm/...)."),
     out: Path = typer.Option(Path("output"), help="Output directory."),
     title: str = typer.Option("Transcription", help="Score title."),
+    effort: Effort = typer.Option(
+        Effort.balanced, help="fast: ~2x faster | balanced | best: ~2x slower, most accurate."
+    ),
 ):
     """Transcribe an audio file to MIDI + MusicXML + PDF."""
     from . import pipeline
 
     with console.status("Transcribing (first run downloads the ~165 MB model)..."):
-        result = pipeline.run(audio, out, title=title)
+        result = pipeline.run(audio, out, title=title, effort=effort.value)
 
     table = Table(title="Transcription complete")
     table.add_column("What")

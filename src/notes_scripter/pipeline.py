@@ -24,13 +24,18 @@ class PipelineOutput:
     duration: float = 0.0
 
 
-def run(audio_path: Path, out_dir: Path, title: str = "Transcription") -> PipelineOutput:
+def run(
+    audio_path: Path,
+    out_dir: Path,
+    title: str = "Transcription",
+    effort: str = transcribe.DEFAULT_EFFORT,
+) -> PipelineOutput:
     out_dir.mkdir(parents=True, exist_ok=True)
     midi_path = out_dir / "transcription.mid"
     musicxml_path = out_dir / "transcription.musicxml"
     pdf_path = out_dir / "transcription.pdf"
 
-    result = transcribe.transcribe(audio_path, midi_path=midi_path)
+    result = transcribe.transcribe(audio_path, midi_path=midi_path, effort=effort)
     m21_score, detected_key = score.events_to_score(result.notes, result.tempo_bpm, title=title)
     score.score_to_musicxml(m21_score, musicxml_path)
     svg_pages = render.musicxml_to_svgs(musicxml_path)

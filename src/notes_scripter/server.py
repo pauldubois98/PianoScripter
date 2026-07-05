@@ -7,12 +7,13 @@ import uuid
 from pathlib import Path
 
 import structlog
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import FastAPI, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import pipeline
+from .transcribe import DEFAULT_EFFORT, EFFORT_HOP
 
 log = structlog.get_logger()
 
@@ -31,17 +32,19 @@ _DOWNLOADS = {
 
 
 @app.post("/api/transcribe")
-async def transcribe_endpoint(file: UploadFile):
+async def transcribe_endpoint(file: UploadFile, effort: str = Form(DEFAULT_EFFORT)):
+    if effort not in EFFORT_HOP:
+        raise HTTPException(status_code=422, detail=f"effort must be one of {sorted(EFFORT_HOP)}")
     job_id = uuid.uuid4().hex[:12]
     job_dir = _work_root / job_id
     job_dir.mkdir(parents=True)
     suffix = Path(file.filename or "audio").suffix or ".webm"
     audio_path = job_dir / f"input{suffix}"
     audio_path.write_bytes(await file.read())
-    log.info("job_received", job=job_id, filename=file.filename)
+    log.info("job_received", job=job_id, filename=file.filename, effort=effort)
 
     try:
-        out = await run_in_threadpool(pipeline.run, audio_path, job_dir)
+        out = await run_in_threadpool(pipeline.run, audio_path, job_dir, effort=effort)
     except Exception:
         log.exception("job_failed", job=job_id)
         raise HTTPException(status_code=500, detail="Transcription failed") from None
@@ -49,6 +52,7 @@ async def transcribe_endpoint(file: UploadFile):
     _jobs[job_id] = out
     return {
         "id": job_id,
+        "effort": effort,
         "svg_pages": out.svg_pages,
         "tempo_bpm": out.tempo_bpm,
         "key": out.key,

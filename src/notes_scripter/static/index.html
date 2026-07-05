@@ -101,6 +101,22 @@
   .hint { color: var(--muted); font-size: .88rem; }
   footer { text-align: center; padding: 1.2rem; color: var(--muted); font-size: .82rem; }
   input[type=file] { display: none; }
+  .effort {
+    display: flex; align-items: center; gap: .8rem; flex-wrap: wrap;
+    justify-content: center; margin-bottom: 1.4rem;
+  }
+  .effort-label { font-weight: 600; font-size: .9rem; }
+  .segmented {
+    display: inline-flex; border: 1px solid var(--border); border-radius: 10px;
+    overflow: hidden; background: color-mix(in srgb, var(--border) 30%, transparent);
+  }
+  .segmented button {
+    border: none; background: transparent; color: var(--muted);
+    padding: .5rem .9rem; font-size: .88rem; font-weight: 600; cursor: pointer;
+    transition: background .15s, color .15s;
+  }
+  .segmented button + button { border-left: 1px solid var(--border); }
+  .segmented button.active { background: var(--accent); color: #fff; }
 </style>
 </head>
 <body>
@@ -114,6 +130,17 @@
   <main>
     <!-- idle -->
     <div class="card" v-if="state === 'idle'">
+      <div class="effort">
+        <span class="effort-label">Effort</span>
+        <div class="segmented" role="radiogroup" aria-label="Transcription effort">
+          <button v-for="opt in efforts" :key="opt.id"
+                  :class="{ active: effort === opt.id }"
+                  :title="opt.hint" @click="effort = opt.id">
+            {{ opt.icon }} {{ opt.name }}
+          </button>
+        </div>
+        <span class="hint">{{ currentEffort.hint }}</span>
+      </div>
       <div class="actions">
         <button class="action" @click="startRecording">
           <span class="icon">🎙️</span>
@@ -161,6 +188,7 @@
           <span class="chip">🎵 {{ result.n_notes }} notes</span>
           <span class="chip">🥁 {{ Math.round(result.tempo_bpm) }} BPM</span>
           <span class="chip" v-if="result.key">🔑 {{ result.key }}</span>
+          <span class="chip" v-if="result.effort">{{ effortChip }}</span>
         </div>
         <div class="downloads">
           <a class="btn" :href="dl('pdf')" download>⬇ PDF</a>
@@ -186,6 +214,12 @@ createApp({
   data() {
     return {
       state: "idle",       // idle | recording | processing | done
+      effort: "balanced",
+      efforts: [
+        { id: "fast", icon: "⚡", name: "Fast", hint: "About twice as fast — good for a quick draft." },
+        { id: "balanced", icon: "⚖️", name: "Balanced", hint: "The standard accuracy/speed trade-off." },
+        { id: "best", icon: "✨", name: "Best", hint: "About twice as slow — averages more passes for the cleanest score." },
+      ],
       dragging: false,
       error: null,
       result: null,
@@ -196,6 +230,13 @@ createApp({
     };
   },
   computed: {
+    currentEffort() {
+      return this.efforts.find((e) => e.id === this.effort);
+    },
+    effortChip() {
+      const e = this.efforts.find((o) => o.id === this.result?.effort);
+      return e ? `${e.icon} ${e.name}` : "";
+    },
     timerLabel() {
       const m = String(Math.floor(this.seconds / 60)).padStart(2, "0");
       const s = String(this.seconds % 60).padStart(2, "0");
@@ -255,6 +296,7 @@ createApp({
       this.state = "processing";
       const form = new FormData();
       form.append("file", file);
+      form.append("effort", this.effort);
       try {
         const resp = await fetch("/api/transcribe", { method: "POST", body: form });
         if (!resp.ok) throw new Error(await resp.text());

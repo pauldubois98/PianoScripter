@@ -80,17 +80,15 @@ signature estimation. This is where most products fall down.
 
 ## 3. The standard technology pipeline
 
-```
-smartphone mic audio
-  → (1) preprocessing: mono, resample 16–44.1kHz, log-mel spectrogram / CQT
-  → (2) neural acoustic model: onset/offset/pitch/velocity/pedal
-        (CNN+RNN à la ByteDance, or seq2seq Transformer à la MT3)
-  → (3) performance MIDI
-  → (4) MIDI-to-score: beat tracking, rhythm quantization, key/time signature,
-        voice & hand separation (PM2S / transformer MusicXML generation)
-  → (5) MusicXML
-  → (6) engraving: Verovio (interactive display) / MuseScore or LilyPond (PDF)
-  → exports: PDF, MIDI, MusicXML
+```mermaid
+flowchart TD
+    A[Smartphone mic audio] --> B["(1) Preprocessing<br/>mono · resample · log-mel / CQT"]
+    B --> C["(2) Neural acoustic model<br/>onset / offset / pitch / velocity / pedal<br/>CNN+RNN (ByteDance) or seq2seq Transformer (MT3)"]
+    C --> D["(3) Performance MIDI"]
+    D --> E["(4) MIDI-to-score<br/>beat tracking · rhythm quantization ·<br/>key & time signature · voice/hand separation<br/>(PM2S / transformer MusicXML generation)"]
+    E --> F["(5) MusicXML"]
+    F --> G["(6) Engraving<br/>Verovio (interactive) · MuseScore / LilyPond (PDF)"]
+    G --> H[Exports: PDF · MIDI · MusicXML]
 ```
 
 Stages (2) and (4) are the two ML problems; everything else is plumbing with mature

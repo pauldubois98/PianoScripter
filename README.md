@@ -24,12 +24,31 @@ uv run notes-scripter transcribe recording.wav --out output/
 
 ## How it works
 
+```mermaid
+flowchart LR
+    A[🎙️ Audio<br/>mic or file] -->|ffmpeg decode| B[16 kHz mono]
+    B -->|ByteDance CRNN| C[Note events<br/>onset · offset · pitch · velocity]
+    B -->|librosa beat tracking| D[Tempo estimate]
+    C --> E[music21 score<br/>quantization · hand split · key]
+    D --> E
+    E --> F[MusicXML]
+    F -->|Verovio| G[SVG score]
+    G -->|cairosvg + pypdf| H[📄 PDF]
+    C -->|write_events_to_midi| I[🎹 MIDI]
 ```
-audio ──ByteDance CRNN──▶ note events (onset/offset/pitch/velocity, seconds)
-      ──librosa beat tracking──▶ tempo estimate
-      ──quantization + hand split + key analysis (music21)──▶ MusicXML
-      ──Verovio──▶ SVG score  ──cairosvg──▶ PDF
-```
+
+### Effort levels
+
+Inference slides a 10-second window over the recording; the **effort** setting controls
+how much the windows overlap and get averaged:
+
+| Effort | Window hop | Speed | When to use |
+|---|---|---|---|
+| ⚡ Fast | 100% (no overlap) | ~2× faster | Quick drafts |
+| ⚖️ Balanced (default) | 50% | baseline | Everyday use |
+| ✨ Best | 25% | ~2× slower | Final scores, dense passages |
+
+Available in the UI (segmented control) and the CLI (`--effort fast|balanced|best`).
 
 - `src/notes_scripter/transcribe.py` — audio decoding (ffmpeg), tempo estimation, model inference
 - `src/notes_scripter/score.py` — 16th-note quantization, chord grouping, hand split at middle C, key detection

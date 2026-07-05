@@ -29,10 +29,11 @@ def synth_song(path: Path, sr: int = 16000) -> None:
 
 
 @pytest.mark.slow
-def test_full_pipeline(tmp_path: Path):
+@pytest.mark.parametrize("effort", ["fast", "balanced", "best"])
+def test_full_pipeline(tmp_path: Path, effort: str):
     wav = tmp_path / "song.wav"
     synth_song(wav)
-    out = pipeline.run(wav, tmp_path / "out")
+    out = pipeline.run(wav, tmp_path / "out", effort=effort)
     assert out.midi.exists()
     assert out.musicxml.exists()
     assert out.pdf.read_bytes()[:5] == b"%PDF-"

@@ -37,6 +37,15 @@ def test_musicxml_written(tmp_path: Path):
     assert out.exists() and out.stat().st_size > 1000
 
 
+def test_invalid_effort_rejected():
+    import pytest
+
+    from notes_scripter.transcribe import transcribe
+
+    with pytest.raises(ValueError, match="effort"):
+        transcribe(Path("whatever.wav"), effort="turbo")
+
+
 def test_empty_events():
     score, detected_key = events_to_score([], bpm=120.0)
     assert detected_key is None
