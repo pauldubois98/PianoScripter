@@ -86,7 +86,7 @@ def quantize(notes: list[NoteEvent], bpm: float) -> list[QuantNote]:
 
 
 def build_score(
-    qnotes: list[QuantNote], bpm: float, title: str = "Transcription"
+    qnotes: list[QuantNote], bpm: float, title: str = "Transcription", composer: str = ""
 ) -> tuple[stream.Score, str | None]:
     right, left = stream.Part(), stream.Part()
     parts = {"R": right, "L": left}
@@ -102,7 +102,11 @@ def build_score(
         el.volume.velocity = max(q.velocity for q in group)
         parts[hand].insert(onset, el)
 
-    right.insert(0, instrument.Piano())
+    # keep the Piano instrument for MIDI playback, but hide its name on the score
+    piano = instrument.Piano()
+    piano.instrumentName = ""
+    piano.instrumentAbbreviation = ""
+    right.insert(0, piano)
     right.insert(0, clef.TrebleClef())
     # text-only mark: the glyph form uses SMuFL private-use chars that break PDF export
     right.insert(0, tempo.MetronomeMark(text=f"{round(bpm)} BPM"))
@@ -111,7 +115,7 @@ def build_score(
         part.insert(0, meter.TimeSignature("4/4"))
 
     score = stream.Score()
-    score.insert(0, metadata.Metadata(title=title, composer=""))
+    score.insert(0, metadata.Metadata(title=title, composer=composer))
     score.insert(0, right)
     score.insert(0, left)
 

@@ -118,6 +118,14 @@
   }
   .segmented button + button { border-left: 1px solid var(--border); }
   .segmented button.active { background: var(--accent); color: #fff; }
+  .meta-edit { display: flex; gap: .7rem; flex-wrap: wrap; justify-content: center; width: 100%; }
+  .meta-edit input {
+    flex: 1 1 200px; max-width: 320px;
+    padding: .55rem .8rem; border: 1px solid var(--border); border-radius: 10px;
+    background: var(--bg); color: var(--text); font-size: .95rem;
+  }
+  .meta-edit input:focus { outline: none; border-color: var(--accent); }
+  .meta-busy { color: var(--muted); font-size: .85rem; }
 </style>
 </head>
 <body>
@@ -210,6 +218,13 @@
     <!-- result -->
     <div v-else-if="state === 'done'">
       <div class="card center">
+        <div class="meta-edit">
+          <input v-model.trim="title" placeholder="Title" aria-label="Title"
+                 @keyup.enter="$event.target.blur()" @change="updateMeta" />
+          <input v-model.trim="author" placeholder="Author (optional)" aria-label="Author"
+                 @keyup.enter="$event.target.blur()" @change="updateMeta" />
+        </div>
+        <span class="meta-busy" v-if="metaBusy">Updating the score…</span>
         <div class="chips">
           <span class="chip">⏱️ {{ result.duration }} s</span>
           <span class="chip">🎵 {{ result.n_notes }} notes</span>
@@ -251,6 +266,9 @@ createApp({
       dragging: false,
       error: null,
       result: null,
+      title: "Transcription",
+      author: "",
+      metaBusy: false,
       recorder: null,
       chunks: [],
       seconds: 0,
@@ -281,6 +299,25 @@ createApp({
       this.state = "idle";
       this.error = null;
       this.result = null;
+      this.title = "Transcription";
+      this.author = "";
+    },
+    async updateMeta() {
+      if (!this.result) return;
+      this.metaBusy = true;
+      try {
+        const form = new FormData();
+        form.append("title", this.title || "Transcription");
+        form.append("author", this.author);
+        const resp = await fetch(`/api/jobs/${this.result.id}/meta`, { method: "POST", body: form });
+        if (resp.ok) {
+          this.result = await resp.json();
+          this.title = this.result.title;
+          this.author = this.result.author;
+        }
+      } finally {
+        this.metaBusy = false;
+      }
     },
     dl(kind) {
       return `/api/download/${this.result.id}/${kind}`;
@@ -385,10 +422,14 @@ createApp({
       const form = new FormData();
       form.append("file", file);
       form.append("effort", this.effort);
+      form.append("title", this.title || "Transcription");
+      form.append("author", this.author);
       try {
         const resp = await fetch("/api/transcribe", { method: "POST", body: form });
         if (!resp.ok) throw new Error(await resp.text());
         this.result = await resp.json();
+        this.title = this.result.title;
+        this.author = this.result.author;
         this.state = "done";
       } catch {
         this.error = "Transcription failed — check the terminal logs and try again.";

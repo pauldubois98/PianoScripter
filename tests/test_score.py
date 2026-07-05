@@ -49,6 +49,15 @@ def test_exports_written(tmp_path: Path):
     assert midi.read_bytes()[:4] == b"MThd"
 
 
+def test_title_author_and_no_instrument_label(tmp_path: Path):
+    qnotes = quantize(make_events(), bpm=120.0)
+    score, _ = build_score(qnotes, bpm=120.0, title="My Song", composer="Paul")
+    xml = score_to_musicxml(score, tmp_path / "t.musicxml").read_text()
+    assert "My Song" in xml
+    assert "Paul" in xml
+    assert "Piano" not in xml
+
+
 def test_invalid_effort_rejected():
     from notes_scripter.transcribe import transcribe
 

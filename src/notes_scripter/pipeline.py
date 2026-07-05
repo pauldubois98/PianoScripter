@@ -27,7 +27,11 @@ class PipelineOutput:
 
 
 def rebuild(
-    qnotes: list[QuantNote], bpm: float, out_dir: Path, title: str = "Transcription"
+    qnotes: list[QuantNote],
+    bpm: float,
+    out_dir: Path,
+    title: str = "Transcription",
+    composer: str = "",
 ) -> PipelineOutput:
     """Generate score and every export from the quantized note list."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -35,10 +39,10 @@ def rebuild(
     musicxml_path = out_dir / "transcription.musicxml"
     pdf_path = out_dir / "transcription.pdf"
 
-    m21_score, detected_key = score.build_score(qnotes, bpm, title=title)
+    m21_score, detected_key = score.build_score(qnotes, bpm, title=title, composer=composer)
     score.score_to_musicxml(m21_score, musicxml_path)
     score.score_to_midi(m21_score, bpm, midi_path)
-    svg_pages = render.musicxml_to_svgs(musicxml_path)
+    svg_pages = render.musicxml_to_svgs(musicxml_path, title=title, composer=composer)
     render.svgs_to_pdf(svg_pages, pdf_path)
 
     return PipelineOutput(
@@ -65,10 +69,11 @@ def run(
     audio_path: Path,
     out_dir: Path,
     title: str = "Transcription",
+    composer: str = "",
     effort: str = transcribe.DEFAULT_EFFORT,
 ) -> PipelineOutput:
     result = transcribe.transcribe(audio_path, midi_path=None, effort=effort)
     qnotes = score.quantize(result.notes, result.tempo_bpm)
-    out = rebuild(qnotes, result.tempo_bpm, out_dir, title=title)
+    out = rebuild(qnotes, result.tempo_bpm, out_dir, title=title, composer=composer)
     out.duration = result.duration
     return out
