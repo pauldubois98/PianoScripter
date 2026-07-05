@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NotesScripter</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎹</text></svg>" />
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --text: #1a1d21;
+    --muted: #6b7280;
+    --accent: #4f46e5;
+    --accent-hover: #4338ca;
+    --danger: #dc2626;
+    --border: #e5e7eb;
+    --shadow: 0 1px 3px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101216;
+      --card: #1a1e24;
+      --text: #e7e9ec;
+      --muted: #9aa1ab;
+      --accent: #818cf8;
+      --accent-hover: #a5b0fc;
+      --border: #2a2f37;
+      --shadow: 0 1px 3px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text);
+    min-height: 100vh; display: flex; flex-direction: column;
+  }
+  header { padding: 2.2rem 1rem 0.4rem; text-align: center; }
+  header h1 { font-size: 1.7rem; letter-spacing: -0.02em; }
+  header p { color: var(--muted); margin-top: .35rem; font-size: .95rem; }
+  .badge {
+    display: inline-flex; align-items: center; gap: .4rem;
+    margin-top: .7rem; padding: .3rem .75rem; border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent); font-size: .8rem; font-weight: 600;
+  }
+  main { flex: 1; width: 100%; max-width: 880px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 16px; box-shadow: var(--shadow); padding: 2rem;
+  }
+  .actions { display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; }
+  .action {
+    flex: 1 1 240px; display: flex; flex-direction: column; align-items: center; gap: .8rem;
+    padding: 2rem 1.2rem; border: 1.5px dashed var(--border); border-radius: 14px;
+    background: transparent; color: var(--text); cursor: pointer;
+    transition: border-color .15s, background .15s; font-size: 1rem;
+  }
+  .action:hover, .action.dragover {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
+  }
+  .action .icon { font-size: 2.2rem; }
+  .action small { color: var(--muted); }
+  .btn {
+    display: inline-flex; align-items: center; gap: .5rem;
+    padding: .65rem 1.3rem; border: none; border-radius: 10px;
+    background: var(--accent); color: #fff; font-size: .95rem; font-weight: 600;
+    cursor: pointer; transition: background .15s;
+  }
+  .btn:hover { background: var(--accent-hover); }
+  .btn.secondary { background: transparent; color: var(--accent); border: 1.5px solid var(--accent); }
+  .btn.danger { background: var(--danger); }
+  .center { display: flex; flex-direction: column; align-items: center; gap: 1.2rem; text-align: center; }
+  .rec-dot {
+    width: 14px; height: 14px; border-radius: 50%; background: var(--danger);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1);} 50% { opacity: .35; transform: scale(.8);} }
+  .timer { font-variant-numeric: tabular-nums; font-size: 2rem; font-weight: 700; }
+  .spinner {
+    width: 42px; height: 42px; border-radius: 50%;
+    border: 4px solid var(--border); border-top-color: var(--accent);
+    animation: spin .9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .chips { display: flex; gap: .6rem; flex-wrap: wrap; justify-content: center; }
+  .chip {
+    padding: .35rem .8rem; border-radius: 999px; font-size: .85rem;
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  }
+  .downloads { display: flex; gap: .7rem; flex-wrap: wrap; justify-content: center; margin-top: 1rem; }
+  .pages { margin-top: 1.6rem; display: flex; flex-direction: column; gap: 1.2rem; }
+  .page {
+    background: #fff; border: 1px solid var(--border); border-radius: 10px;
+    overflow-x: auto; box-shadow: var(--shadow);
+  }
+  .page svg { display: block; width: 100%; height: auto; }
+  .error { color: var(--danger); font-weight: 600; }
+  .hint { color: var(--muted); font-size: .88rem; }
+  footer { text-align: center; padding: 1.2rem; color: var(--muted); font-size: .82rem; }
+  input[type=file] { display: none; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>🎹 NotesScripter</h1>
+    <p>Play the piano. Get the sheet music.</p>
+    <span class="badge">🔒 100% on-device — audio never leaves this computer</span>
+  </header>
+
+  <main>
+    <!-- idle -->
+    <div class="card" v-if="state === 'idle'">
+      <div class="actions">
+        <button class="action" @click="startRecording">
+          <span class="icon">🎙️</span>
+          <span><strong>Record</strong></span>
+          <small>Use the microphone</small>
+        </button>
+        <label class="action" :class="{ dragover: dragging }"
+               @dragover.prevent="dragging = true" @dragleave="dragging = false"
+               @drop.prevent="onDrop">
+          <span class="icon">📁</span>
+          <span><strong>Upload a recording</strong></span>
+          <small>WAV, MP3, FLAC, OGG… — click or drop a file</small>
+          <input type="file" accept="audio/*" @change="onPick" />
+        </label>
+      </div>
+      <p class="hint" style="text-align:center; margin-top:1.4rem" v-if="error === null">
+        The first transcription downloads the model (~165 MB), then everything works offline.
+      </p>
+      <p class="error" style="text-align:center; margin-top:1.4rem" v-else>{{ error }}</p>
+    </div>
+
+    <!-- recording -->
+    <div class="card center" v-else-if="state === 'recording'">
+      <div style="display:flex; align-items:center; gap:.7rem">
+        <span class="rec-dot"></span><strong>Recording…</strong>
+      </div>
+      <div class="timer">{{ timerLabel }}</div>
+      <p class="hint">Play your piece, then stop when you're done.</p>
+      <button class="btn danger" @click="stopRecording">■ Stop &amp; transcribe</button>
+    </div>
+
+    <!-- processing -->
+    <div class="card center" v-else-if="state === 'processing'">
+      <div class="spinner"></div>
+      <strong>Transcribing…</strong>
+      <p class="hint">Detecting notes → quantizing rhythm → engraving the score.<br/>
+        First run may take longer while the model downloads.</p>
+    </div>
+
+    <!-- result -->
+    <div v-else-if="state === 'done'">
+      <div class="card center">
+        <div class="chips">
+          <span class="chip">⏱️ {{ result.duration }} s</span>
+          <span class="chip">🎵 {{ result.n_notes }} notes</span>
+          <span class="chip">🥁 {{ Math.round(result.tempo_bpm) }} BPM</span>
+          <span class="chip" v-if="result.key">🔑 {{ result.key }}</span>
+        </div>
+        <div class="downloads">
+          <a class="btn" :href="dl('pdf')" download>⬇ PDF</a>
+          <a class="btn" :href="dl('midi')" download>⬇ MIDI</a>
+          <a class="btn" :href="dl('musicxml')" download>⬇ MusicXML</a>
+          <button class="btn secondary" @click="reset">↺ New transcription</button>
+        </div>
+      </div>
+      <div class="pages">
+        <div class="page" v-for="(svg, i) in result.svg_pages" :key="i" v-html="svg"></div>
+      </div>
+    </div>
+  </main>
+
+  <footer>NotesScripter — open source, local-first piano transcription.</footer>
+</div>
+
+<script src="vue.global.prod.js"></script>
+<script>
+const { createApp } = Vue;
+
+createApp({
+  data() {
+    return {
+      state: "idle",       // idle | recording | processing | done
+      dragging: false,
+      error: null,
+      result: null,
+      recorder: null,
+      chunks: [],
+      seconds: 0,
+      timerId: null,
+    };
+  },
+  computed: {
+    timerLabel() {
+      const m = String(Math.floor(this.seconds / 60)).padStart(2, "0");
+      const s = String(this.seconds % 60).padStart(2, "0");
+      return `${m}:${s}`;
+    },
+  },
+  methods: {
+    reset() {
+      this.state = "idle";
+      this.error = null;
+      this.result = null;
+    },
+    dl(kind) {
+      return `/api/download/${this.result.id}/${kind}`;
+    },
+    async startRecording() {
+      this.error = null;
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+        });
+      } catch {
+        this.error = "Microphone access was denied.";
+        return;
+      }
+      this.chunks = [];
+      this.recorder = new MediaRecorder(stream);
+      this.recorder.ondataavailable = (e) => e.data.size && this.chunks.push(e.data);
+      this.recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(this.chunks, { type: this.recorder.mimeType });
+        const ext = this.recorder.mimeType.includes("ogg") ? "ogg" : "webm";
+        this.transcribe(new File([blob], `recording.${ext}`));
+      };
+      this.recorder.start();
+      this.seconds = 0;
+      this.timerId = setInterval(() => this.seconds++, 1000);
+      this.state = "recording";
+    },
+    stopRecording() {
+      clearInterval(this.timerId);
+      this.recorder.stop();
+      this.state = "processing";
+    },
+    onPick(e) {
+      const f = e.target.files[0];
+      if (f) this.transcribe(f);
+      e.target.value = "";
+    },
+    onDrop(e) {
+      this.dragging = false;
+      const f = e.dataTransfer.files[0];
+      if (f) this.transcribe(f);
+    },
+    async transcribe(file) {
+      this.state = "processing";
+      const form = new FormData();
+      form.append("file", file);
+      try {
+        const resp = await fetch("/api/transcribe", { method: "POST", body: form });
+        if (!resp.ok) throw new Error(await resp.text());
+        this.result = await resp.json();
+        this.state = "done";
+      } catch {
+        this.error = "Transcription failed — check the terminal logs and try again.";
+        this.state = "idle";
+      }
+    },
+  },
+}).mount("#app");
+</script>
+</body>
+</html>

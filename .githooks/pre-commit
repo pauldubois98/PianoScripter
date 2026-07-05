@@ -1,0 +1,9 @@
+#!/bin/sh
+# Fast checks before every commit: formatting, lint, fast tests (<1 min).
+set -e
+echo "pre-commit: ruff format --check"
+uv run ruff format --check .
+echo "pre-commit: ruff check"
+uv run ruff check .
+echo "pre-commit: pytest (fast)"
+uv run pytest -q
