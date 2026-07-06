@@ -5,8 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>NotesScripter</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎹</text></svg>" />
+<script>
+  // apply the saved theme before first paint to avoid a flash
+  const savedTheme = localStorage.getItem("theme");
+  if (savedTheme) document.documentElement.dataset.theme = savedTheme;
+</script>
 <style>
   :root {
+    color-scheme: light;
     --bg: #f6f7f9;
     --card: #ffffff;
     --text: #1a1d21;
@@ -17,8 +23,20 @@
     --border: #e5e7eb;
     --shadow: 0 1px 3px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.05);
   }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #101216;
+    --card: #1a1e24;
+    --text: #e7e9ec;
+    --muted: #9aa1ab;
+    --accent: #818cf8;
+    --accent-hover: #a5b0fc;
+    --border: #2a2f37;
+    --shadow: 0 1px 3px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+  }
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
       --bg: #101216;
       --card: #1a1e24;
       --text: #e7e9ec;
@@ -30,12 +48,22 @@
     }
   }
   * { box-sizing: border-box; margin: 0; }
+  html { background: var(--bg); }
   body {
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     background: var(--bg); color: var(--text);
     min-height: 100vh; display: flex; flex-direction: column;
   }
   header { padding: 2.2rem 1rem 0.4rem; text-align: center; }
+  .theme-toggle {
+    position: fixed; top: 1rem; right: 1rem; z-index: 10;
+    width: 42px; height: 42px; border-radius: 50%;
+    border: 1px solid var(--border); background: var(--card); color: var(--text);
+    font-size: 1.15rem; cursor: pointer; box-shadow: var(--shadow);
+    display: flex; align-items: center; justify-content: center;
+    transition: border-color .15s;
+  }
+  .theme-toggle:hover { border-color: var(--accent); }
   header h1 { font-size: 1.7rem; letter-spacing: -0.02em; }
   header p { color: var(--muted); margin-top: .35rem; font-size: .95rem; }
   .badge {
@@ -145,6 +173,10 @@
 </head>
 <body>
 <div id="app">
+  <button class="theme-toggle" :aria-label="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
+          :title="theme === 'dark' ? 'Light mode' : 'Dark mode'" @click="toggleTheme">
+    {{ theme === "dark" ? "☀️" : "🌙" }}
+  </button>
   <header>
     <h1>🎹 NotesScripter</h1>
     <p>Play the piano. Get the sheet music.</p>
@@ -291,6 +323,8 @@ createApp({
   data() {
     return {
       state: "idle",       // idle | recording | live | processing | done
+      theme: localStorage.getItem("theme")
+        || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
       effort: "balanced",
       efforts: [
         { id: "ultra", icon: "🚀", name: "Ultra", hint: "Near-instant — the engine behind live sessions; roughest score." },
@@ -331,7 +365,15 @@ createApp({
       return `${m}:${s}`;
     },
   },
+  mounted() {
+    document.documentElement.dataset.theme = this.theme;
+  },
   methods: {
+    toggleTheme() {
+      this.theme = this.theme === "dark" ? "light" : "dark";
+      document.documentElement.dataset.theme = this.theme;
+      localStorage.setItem("theme", this.theme);
+    },
     reset() {
       this.state = "idle";
       this.error = null;
