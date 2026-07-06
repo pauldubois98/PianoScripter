@@ -125,6 +125,11 @@
     background: var(--bg); color: var(--text); font-size: .95rem;
   }
   .meta-edit input:focus { outline: none; border-color: var(--accent); }
+  .meta-edit .bpm-field {
+    flex: 0 0 auto; display: flex; align-items: center; gap: .45rem;
+    color: var(--muted); font-size: .9rem; font-weight: 600;
+  }
+  .meta-edit .bpm-field input { flex: 0 0 auto; width: 88px; }
   .meta-busy { color: var(--muted); font-size: .85rem; }
 </style>
 </head>
@@ -220,17 +225,30 @@
       <div class="card center">
         <div class="meta-edit">
           <input v-model.trim="title" placeholder="Title" aria-label="Title"
-                 @keyup.enter="$event.target.blur()" @change="updateMeta" />
+                 :disabled="updating" @keyup.enter="$event.target.blur()" @change="updateJob()" />
           <input v-model.trim="author" placeholder="Author (optional)" aria-label="Author"
-                 @keyup.enter="$event.target.blur()" @change="updateMeta" />
+                 :disabled="updating" @keyup.enter="$event.target.blur()" @change="updateJob()" />
+          <label class="bpm-field">
+            <input type="number" min="20" max="300" step="1" v-model.number="bpm" aria-label="BPM"
+                   :disabled="updating" @keyup.enter="$event.target.blur()" @change="onBpmChange" />
+            BPM
+          </label>
         </div>
-        <span class="meta-busy" v-if="metaBusy">Updating the score…</span>
+        <div class="effort" style="margin-bottom:0">
+          <span class="effort-label">Effort</span>
+          <div class="segmented" role="radiogroup" aria-label="Transcription effort">
+            <button v-for="opt in efforts" :key="opt.id"
+                    :class="{ active: result.effort === opt.id }" :disabled="updating"
+                    :title="effortSwapHint(opt.id)" @click="changeEffort(opt.id)">
+              {{ opt.icon }} {{ opt.name }}
+            </button>
+          </div>
+        </div>
+        <span class="meta-busy" v-if="updating">{{ updatingLabel }}</span>
         <div class="chips">
           <span class="chip">⏱️ {{ result.duration }} s</span>
           <span class="chip">🎵 {{ result.n_notes }} notes</span>
-          <span class="chip">🥁 {{ Math.round(result.tempo_bpm) }} BPM</span>
           <span class="chip" v-if="result.key">🔑 {{ result.key }}</span>
-          <span class="chip" v-if="result.effort">{{ effortChip }}</span>
         </div>
         <div class="downloads">
           <a class="btn" :href="dl('pdf')" download>⬇ PDF</a>
@@ -268,7 +286,10 @@ createApp({
       result: null,
       title: "Transcription",
       author: "",
-      metaBusy: false,
+      bpm: 120,
+      bpmTouched: false,
+      updating: false,
+      updatingLabel: "",
       recorder: null,
       chunks: [],
       seconds: 0,
@@ -284,10 +305,6 @@ createApp({
     currentEffort() {
       return this.efforts.find((e) => e.id === this.effort);
     },
-    effortChip() {
-      const e = this.efforts.find((o) => o.id === this.result?.effort);
-      return e ? `${e.icon} ${e.name}` : "";
-    },
     timerLabel() {
       const m = String(Math.floor(this.seconds / 60)).padStart(2, "0");
       const s = String(this.seconds % 60).padStart(2, "0");
@@ -301,22 +318,51 @@ createApp({
       this.result = null;
       this.title = "Transcription";
       this.author = "";
+      this.bpm = 120;
+      this.bpmTouched = false;
     },
-    async updateMeta() {
-      if (!this.result) return;
-      this.metaBusy = true;
+    syncFromResult() {
+      this.title = this.result.title;
+      this.author = this.result.author;
+      this.bpm = Math.round(this.result.tempo_bpm);
+    },
+    effortSwapHint(id) {
+      if (id === this.result.effort) return "Current effort";
+      return this.result.cached_efforts.includes(id)
+        ? "Already computed — swaps instantly"
+        : "Re-runs the transcription at this effort";
+    },
+    changeEffort(id) {
+      if (this.updating || id === this.result.effort) return;
+      this.effort = id; // also becomes the default for the next transcription
+      this.updateJob(id);
+    },
+    onBpmChange() {
+      this.bpm = Math.min(300, Math.max(20, Math.round(this.bpm) || 120));
+      this.bpmTouched = true;
+      this.updateJob();
+    },
+    async updateJob(newEffort) {
+      if (!this.result || this.updating) return;
+      const opt = newEffort && this.efforts.find((e) => e.id === newEffort);
+      const rerun = opt && !this.result.cached_efforts.includes(newEffort);
+      this.updating = true;
+      this.updatingLabel = rerun
+        ? `Re-transcribing at ${opt.name.toLowerCase()} effort — this runs the model again…`
+        : "Updating the score…";
       try {
         const form = new FormData();
         form.append("title", this.title || "Transcription");
         form.append("author", this.author);
-        const resp = await fetch(`/api/jobs/${this.result.id}/meta`, { method: "POST", body: form });
+        if (this.bpmTouched) form.append("bpm", this.bpm);
+        if (newEffort) form.append("effort", newEffort);
+        const resp = await fetch(`/api/jobs/${this.result.id}/update`, { method: "POST", body: form });
         if (resp.ok) {
           this.result = await resp.json();
-          this.title = this.result.title;
-          this.author = this.result.author;
+          this.syncFromResult();
         }
       } finally {
-        this.metaBusy = false;
+        this.updating = false;
       }
     },
     dl(kind) {
@@ -428,8 +474,7 @@ createApp({
         const resp = await fetch("/api/transcribe", { method: "POST", body: form });
         if (!resp.ok) throw new Error(await resp.text());
         this.result = await resp.json();
-        this.title = this.result.title;
-        this.author = this.result.author;
+        this.syncFromResult();
         this.state = "done";
       } catch {
         this.error = "Transcription failed — check the terminal logs and try again.";

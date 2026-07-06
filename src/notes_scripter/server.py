@@ -30,11 +30,16 @@ _work_root = Path(tempfile.mkdtemp(prefix="notes-scripter-"))
 @dataclass
 class Job:
     dir: Path
-    out: pipeline.PipelineOutput
+    audio_path: Path
     effort: str
-    duration: float
+    duration: float = 0.0
     title: str = "Transcription"
     author: str = ""
+    bpm_override: float | None = None
+    out: pipeline.PipelineOutput | None = None
+    # model output per effort level: switching back to a computed effort is instant
+    cache: dict[str, transcribe.TranscriptionResult] = field(default_factory=dict)
+    lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 @dataclass
@@ -61,6 +66,7 @@ def _job_payload(job_id: str, job: Job) -> dict:
     return {
         "id": job_id,
         "effort": job.effort,
+        "cached_efforts": [e for e in EFFORT_HOP if e in job.cache],
         "svg_pages": job.out.svg_pages,
         "tempo_bpm": job.out.tempo_bpm,
         "key": job.out.key,
@@ -69,6 +75,22 @@ def _job_payload(job_id: str, job: Job) -> dict:
         "title": job.title,
         "author": job.author,
     }
+
+
+def _apply_update(job: Job, effort: str | None = None) -> None:
+    """Blocking: run the model if this effort is new, then re-engrave all outputs."""
+    with job.lock:
+        if effort:
+            if effort not in job.cache:
+                job.cache[effort] = transcribe.transcribe(job.audio_path, effort=effort)
+            job.effort = effort
+        res = job.cache[job.effort]
+        bpm = job.bpm_override or res.tempo_bpm
+        qnotes = score.quantize(res.notes, bpm)
+        out = pipeline.rebuild(qnotes, bpm, job.dir, title=job.title, composer=job.author)
+        out.duration = res.duration
+        job.out = out
+        job.duration = res.duration
 
 
 @app.post("/api/transcribe")
@@ -90,42 +112,40 @@ async def transcribe_endpoint(
     audio_path.write_bytes(await file.read())
     log.info("job_received", job=job_id, filename=file.filename, effort=effort)
 
+    job = Job(dir=job_dir, audio_path=audio_path, effort=effort, title=title, author=author)
     try:
-        out = await run_in_threadpool(
-            pipeline.run, audio_path, job_dir, title=title, composer=author, effort=effort
-        )
+        await run_in_threadpool(_apply_update, job, effort)
     except Exception:
         log.exception("job_failed", job=job_id)
         raise HTTPException(status_code=500, detail="Transcription failed") from None
 
-    _jobs[job_id] = Job(
-        dir=job_dir, out=out, effort=effort, duration=out.duration, title=title, author=author
-    )
-    return _job_payload(job_id, _jobs[job_id])
+    _jobs[job_id] = job
+    return _job_payload(job_id, job)
 
 
-@app.post("/api/jobs/{job_id}/meta")
-async def update_meta(job_id: str, title: str = Form("Transcription"), author: str = Form("")):
-    """Re-engrave the score and exports with a new title/author."""
+@app.post("/api/jobs/{job_id}/update")
+async def update_job(
+    job_id: str,
+    title: str = Form("Transcription"),
+    author: str = Form(""),
+    bpm: float | None = Form(None),
+    effort: str | None = Form(None),
+):
+    """Re-engrave with new title/author/BPM and/or rerun the model at another effort."""
     job = _jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404)
+    if effort is not None and effort not in EFFORT_HOP:
+        raise HTTPException(status_code=422, detail=f"effort must be one of {sorted(EFFORT_HOP)}")
     job.title = title.strip() or "Transcription"
     job.author = author.strip()
+    if bpm is not None:
+        job.bpm_override = min(max(bpm, 20.0), 300.0)
     try:
-        out = await run_in_threadpool(
-            pipeline.rebuild,
-            job.out.qnotes,
-            job.out.tempo_bpm,
-            job.dir,
-            title=job.title,
-            composer=job.author,
-        )
+        await run_in_threadpool(_apply_update, job, effort)
     except Exception:
-        log.exception("meta_update_failed", job=job_id)
+        log.exception("job_update_failed", job=job_id)
         raise HTTPException(status_code=500, detail="Update failed") from None
-    out.duration = job.duration
-    job.out = out
     return _job_payload(job_id, job)
 
 
