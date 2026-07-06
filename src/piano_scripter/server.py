@@ -25,9 +25,9 @@ LIVE_CONTEXT_SECONDS = 2.0  # reprocessed tail: lets note offsets refine on late
 LIVE_MIN_NEW_SECONDS = 0.3  # skip a pass when almost no new audio arrived
 LIVE_ENGRAVE_INTERVAL = 3.0  # seconds between engraved-draft refreshes
 
-app = FastAPI(title="NotesScripter", docs_url=None, redoc_url=None)
+app = FastAPI(title="PianoScripter", docs_url=None, redoc_url=None)
 
-_work_root = Path(tempfile.mkdtemp(prefix="notes-scripter-"))
+_work_root = Path(tempfile.mkdtemp(prefix="piano-scripter-"))
 
 
 @dataclass

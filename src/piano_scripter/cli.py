@@ -1,4 +1,4 @@
-"""NotesScripter CLI."""
+"""PianoScripter CLI."""
 
 from __future__ import annotations
 
@@ -26,10 +26,10 @@ def serve(
     import uvicorn
 
     url = f"http://127.0.0.1:{port}"
-    console.print(f"[bold green]NotesScripter[/] running at [link]{url}[/link] (local only)")
+    console.print(f"[bold green]PianoScripter[/] running at [link]{url}[/link] (local only)")
     if open_browser:
         webbrowser.open(url)
-    uvicorn.run("notes_scripter.server:app", host="127.0.0.1", port=port, log_level="warning")
+    uvicorn.run("piano_scripter.server:app", host="127.0.0.1", port=port, log_level="warning")
 
 
 class Effort(str, Enum):

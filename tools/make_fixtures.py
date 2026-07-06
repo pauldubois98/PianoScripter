@@ -17,7 +17,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from notes_scripter import score, transcribe, ultra  # noqa: E402
+from piano_scripter import score, transcribe, ultra  # noqa: E402
 
 OUT = Path(__file__).resolve().parent.parent / "web" / "tests" / "fixtures"
 

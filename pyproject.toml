@@ -1,5 +1,5 @@
 [project]
-name = "notes-scripter"
+name = "piano-scripter"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [project.scripts]
-notes-scripter = "notes_scripter.cli:app"
+piano-scripter = "piano_scripter.cli:app"
 
 [tool.uv.sources]
 torch = [{ index = "pytorch-cpu" }]

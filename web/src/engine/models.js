@@ -12,7 +12,7 @@ ort.env.wasm.numThreads = self.crossOriginIsolated
 
 export { ort };
 
-const CACHE_NAME = "notes-scripter-models-v2";
+const CACHE_NAME = "piano-scripter-models-v2";
 
 // The ByteDance exports are too large for the repo; they are downloaded on
 // demand. Order: same-origin models/ dir (local dev / self-hosting), then the

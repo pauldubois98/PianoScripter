@@ -214,7 +214,7 @@ def _events_from_outputs(transcriptor, outputs: dict[str, np.ndarray]) -> list:
 
 
 def verify(transcriptor, model, out_dir: Path, clip: Path) -> bool:
-    from notes_scripter import transcribe as nstranscribe
+    from piano_scripter import transcribe as nstranscribe
 
     audio = nstranscribe.trim_silence(nstranscribe.load_audio(clip))
     segment = np.zeros(SEGMENT_SAMPLES, dtype=np.float32)

@@ -126,7 +126,7 @@ export function buildMusicXml(qnotes, bpm, { title = "Transcription", composer =
     `<work><work-title>${esc(title)}</work-title></work>` +
     "<identification>" +
     (composer ? `<creator type="composer">${esc(composer)}</creator>` : "") +
-    "<encoding><software>NoteScripter</software></encoding>" +
+    "<encoding><software>PianoScripter</software></encoding>" +
     "</identification>" +
     "<part-list>" +
     parts

@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from notes_scripter.pipeline import rebuild
-from notes_scripter.render import musicxml_to_svgs, svgs_to_pdf
-from notes_scripter.score import build_score, quantize, score_to_musicxml
-from notes_scripter.transcribe import NoteEvent
+from piano_scripter.pipeline import rebuild
+from piano_scripter.render import musicxml_to_svgs, svgs_to_pdf
+from piano_scripter.score import build_score, quantize, score_to_musicxml
+from piano_scripter.transcribe import NoteEvent
 
 
 def make_qnotes():

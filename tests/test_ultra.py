@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from notes_scripter import ultra
+from piano_scripter import ultra
 
 
 def synth_posteriors(n_frames: int = 200):
@@ -63,7 +63,7 @@ def test_ultra_end_to_end(tmp_path: Path):
 
     from test_pipeline_e2e import synth_song
 
-    from notes_scripter import transcribe
+    from piano_scripter import transcribe
 
     wav = tmp_path / "song.wav"
     synth_song(wav)

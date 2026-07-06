@@ -26,7 +26,7 @@ MODEL_URL = (
     "https://raw.githubusercontent.com/spotify/basic-pitch/main/"
     "basic_pitch/saved_models/icassp_2022/nmp.onnx"
 )
-MODEL_PATH = Path.home() / ".cache" / "notes-scripter" / "nmp.onnx"
+MODEL_PATH = Path.home() / ".cache" / "piano-scripter" / "nmp.onnx"
 
 # Constants from basic_pitch/constants.py and inference.py
 BP_SAMPLE_RATE = 22050

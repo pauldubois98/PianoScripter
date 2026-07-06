@@ -1,4 +1,4 @@
-# NotesScripter — State of the Art & Research Report
+# PianoScripter — State of the Art & Research Report
 
 *Piano audio → sheet music transcription. Survey date: July 2026.*
 

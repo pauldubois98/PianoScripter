@@ -1,4 +1,4 @@
-# 🎹 NotesScripter
+# 🎹 PianoScripter
 
 Play the piano, get the sheet music — **entirely on your device**. The app is a
 **static website**: audio is recorded (or uploaded) in the browser, transcribed
@@ -71,9 +71,9 @@ that cannot set headers (GitHub Pages), with a single-threaded fallback.
 - `tools/export_onnx.py` — exports the ByteDance PyTorch checkpoint to
   `bytedance-fp32/fp16.onnx` (+ optional int8) with a PyTorch-parity gate
 - `tools/make_fixtures.py` — regenerates the JS test fixtures from the Python reference
-- `src/notes_scripter/` — the original Python implementation, kept as the reference
-  and for the CLI (`uv run notes-scripter transcribe recording.wav --out output/`);
-  the FastAPI server (`notes-scripter serve`) is legacy, superseded by the web app
+- `src/piano_scripter/` — the original Python implementation, kept as the reference
+  and for the CLI (`uv run piano-scripter transcribe recording.wav --out output/`);
+  the FastAPI server (`piano-scripter serve`) is legacy, superseded by the web app
 
 ## Development
 

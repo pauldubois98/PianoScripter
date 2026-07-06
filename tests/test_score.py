@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from notes_scripter.score import build_score, quantize, score_to_midi, score_to_musicxml
-from notes_scripter.transcribe import NoteEvent
+from piano_scripter.score import build_score, quantize, score_to_midi, score_to_musicxml
+from piano_scripter.transcribe import NoteEvent
 
 
 def make_events(lead_silence: float = 0.0) -> list[NoteEvent]:
@@ -59,7 +59,7 @@ def test_title_author_and_no_instrument_label(tmp_path: Path):
 
 
 def test_invalid_effort_rejected():
-    from notes_scripter.transcribe import transcribe
+    from piano_scripter.transcribe import transcribe
 
     with pytest.raises(ValueError, match="effort"):
         transcribe(Path("whatever.wav"), effort="turbo")

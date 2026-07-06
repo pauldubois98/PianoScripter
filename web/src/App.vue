@@ -328,7 +328,7 @@ export default {
     {{ lang === "fr" ? "EN" : "FR" }}
   </button>
   <header>
-    <h1>🎹 NotesScripter</h1>
+    <h1>🎹 PianoScripter</h1>
     <p>{{ msg.subtitle }}</p>
     <span class="badge">{{ msg.badge }}</span>
   </header>

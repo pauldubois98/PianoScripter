@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from notes_scripter import pipeline
+from piano_scripter import pipeline
 
 FREQS = {60: 261.63, 64: 329.63, 67: 392.0, 72: 523.25, 48: 130.81, 55: 196.0}
 
