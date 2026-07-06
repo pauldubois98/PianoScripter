@@ -12,7 +12,7 @@ ort.env.wasm.numThreads = self.crossOriginIsolated
 
 export { ort };
 
-const CACHE_NAME = "notes-scripter-models-v1";
+const CACHE_NAME = "notes-scripter-models-v2";
 
 // The ByteDance exports are too large for the repo; they are downloaded on
 // demand. Order: same-origin models/ dir (local dev / self-hosting), then the
@@ -24,13 +24,17 @@ export const BYTEDANCE_MODELS = {
   balanced: { file: "bytedance-fp16.onnx", mb: 90 },
   best: { file: "bytedance-fp32.onnx", mb: 175 },
 };
-const REMOTE_BASE = "https://huggingface.co/pauldubois98/notescripter-onnx/resolve/main/";
+const REMOTE_BASE = "https://huggingface.co/pauldubois98/piano-quantized/resolve/main/";
 
 const sessions = new Map();
 
 async function fetchWithProgress(url, onProgress) {
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`HTTP ${resp.status} for ${url}`);
+  // static hosts answer missing paths with the SPA's index.html and a 200:
+  // never hand HTML to the ONNX parser
+  const type = resp.headers.get("Content-Type") || "";
+  if (type.includes("text/html")) throw new Error(`not a model file: ${url}`);
   const total = Number(resp.headers.get("Content-Length")) || 0;
   if (!resp.body || !total) return new Uint8Array(await resp.arrayBuffer());
   const reader = resp.body.getReader();
