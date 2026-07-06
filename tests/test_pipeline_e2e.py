@@ -29,7 +29,7 @@ def synth_song(path: Path, sr: int = 16000) -> None:
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("effort", ["fast", "balanced", "best"])
+@pytest.mark.parametrize("effort", ["ultra", "fast", "balanced", "best"])
 def test_full_pipeline(tmp_path: Path, effort: str):
     wav = tmp_path / "song.wav"
     synth_song(wav)

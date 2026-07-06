@@ -103,8 +103,12 @@
   footer { text-align: center; padding: 1.2rem; color: var(--muted); font-size: .82rem; }
   input[type=file] { display: none; }
   .effort {
+    display: flex; flex-direction: column; align-items: center; gap: .6rem;
+    margin-bottom: 1.4rem;
+  }
+  .effort-row {
     display: flex; align-items: center; gap: .8rem; flex-wrap: wrap;
-    justify-content: center; margin-bottom: 1.4rem;
+    justify-content: center;
   }
   .effort-label { font-weight: 600; font-size: .9rem; }
   .segmented {
@@ -131,6 +135,12 @@
   }
   .meta-edit .bpm-field input { flex: 0 0 auto; width: 88px; }
   .meta-busy { color: var(--muted); font-size: .85rem; }
+  .roll-wrap { margin-top: 1.2rem; }
+  .roll-wrap canvas {
+    display: block; width: 100%; height: 240px;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; box-shadow: var(--shadow);
+  }
 </style>
 </head>
 <body>
@@ -145,13 +155,15 @@
     <!-- idle -->
     <div class="card" v-if="state === 'idle'">
       <div class="effort">
-        <span class="effort-label">Effort</span>
-        <div class="segmented" role="radiogroup" aria-label="Transcription effort">
-          <button v-for="opt in efforts" :key="opt.id"
-                  :class="{ active: effort === opt.id }"
-                  :title="opt.hint" @click="effort = opt.id">
-            {{ opt.icon }} {{ opt.name }}
-          </button>
+        <div class="effort-row">
+          <span class="effort-label">Effort</span>
+          <div class="segmented" role="radiogroup" aria-label="Transcription effort">
+            <button v-for="opt in efforts" :key="opt.id"
+                    :class="{ active: effort === opt.id }"
+                    :title="opt.hint" @click="effort = opt.id">
+              {{ opt.icon }} {{ opt.name }}
+            </button>
+          </div>
         </div>
         <span class="hint">{{ currentEffort.hint }}</span>
       </div>
@@ -164,7 +176,7 @@
         <button class="action" @click="startLive">
           <span class="icon">🔴</span>
           <span><strong>Live session</strong></span>
-          <small>Watch the score appear as you play (~10 s behind)</small>
+          <small>See the notes the moment you play them</small>
         </button>
         <label class="action" :class="{ dragover: dragging }"
                @dragover.prevent="dragging = true" @dragleave="dragging = false"
@@ -199,16 +211,17 @@
         </div>
         <div class="timer">{{ timerLabel }}</div>
         <p class="hint">
-          The draft updates in 10-second blocks ({{ liveNotes }} notes so far).
+          Notes land on the roll moments after you play them ({{ liveNotes }} so far).
           Stopping runs a final {{ currentEffort.name.toLowerCase() }}-quality pass.
         </p>
         <button class="btn danger" @click="stopLive">■ Stop &amp; finalize</button>
       </div>
+      <div class="roll-wrap"><canvas ref="roll"></canvas></div>
       <div class="pages" v-if="liveSvgs.length">
         <div class="page" v-for="(svg, i) in liveSvgs" :key="i" v-html="svg"></div>
       </div>
       <p class="hint" style="text-align:center; margin-top:1.4rem" v-else>
-        🎧 Listening… the first notes appear after ~10 seconds of playing.
+        🎧 The engraved draft appears after a few seconds of playing.
       </p>
     </div>
 
@@ -235,14 +248,17 @@
           </label>
         </div>
         <div class="effort" style="margin-bottom:0">
-          <span class="effort-label">Effort</span>
-          <div class="segmented" role="radiogroup" aria-label="Transcription effort">
-            <button v-for="opt in efforts" :key="opt.id"
-                    :class="{ active: result.effort === opt.id }" :disabled="updating"
-                    :title="effortSwapHint(opt.id)" @click="changeEffort(opt.id)">
-              {{ opt.icon }} {{ opt.name }}
-            </button>
+          <div class="effort-row">
+            <span class="effort-label">Effort</span>
+            <div class="segmented" role="radiogroup" aria-label="Transcription effort">
+              <button v-for="opt in efforts" :key="opt.id"
+                      :class="{ active: result.effort === opt.id }" :disabled="updating"
+                      :title="effortSwapHint(opt.id)" @click="changeEffort(opt.id)">
+                {{ opt.icon }} {{ opt.name }}
+              </button>
+            </div>
           </div>
+          <span class="hint">{{ efforts.find((e) => e.id === result.effort).hint }}</span>
         </div>
         <span class="meta-busy" v-if="updating">{{ updatingLabel }}</span>
         <div class="chips">
@@ -277,6 +293,7 @@ createApp({
       state: "idle",       // idle | recording | live | processing | done
       effort: "balanced",
       efforts: [
+        { id: "ultra", icon: "🚀", name: "Ultra", hint: "Near-instant — the engine behind live sessions; roughest score." },
         { id: "fast", icon: "⚡", name: "Fast", hint: "About twice as fast — good for a quick draft." },
         { id: "balanced", icon: "⚖️", name: "Balanced", hint: "The standard accuracy/speed trade-off." },
         { id: "best", icon: "✨", name: "Best", hint: "About twice as slow — averages more passes for the cleanest score." },
@@ -299,6 +316,9 @@ createApp({
       liveBusy: false,
       liveSvgs: [],
       liveNotes: 0,
+      liveEvents: [],
+      liveStart: 0,
+      rollRaf: null,
     };
   },
   computed: {
@@ -416,6 +436,7 @@ createApp({
       this.liveId = (await resp.json()).id;
       this.liveSvgs = [];
       this.liveNotes = 0;
+      this.liveEvents = [];
       this.chunks = [];
       this.recorder = new MediaRecorder(stream);
       this.recorder.ondataavailable = (e) => e.data.size && this.chunks.push(e.data);
@@ -426,8 +447,10 @@ createApp({
       };
       this.recorder.start(1000); // gather data every second
       this.startTimer();
-      this.liveTimerId = setInterval(() => this.sendLiveChunk(), 8000);
+      this.liveStart = performance.now();
+      this.liveTimerId = setInterval(() => this.sendLiveChunk(), 1000);
       this.state = "live";
+      this.$nextTick(() => this.drawRoll());
     },
     async sendLiveChunk() {
       if (this.liveBusy || !this.chunks.length || this.state !== "live") return;
@@ -440,6 +463,7 @@ createApp({
           const data = await resp.json();
           if (data.svg_pages.length) this.liveSvgs = data.svg_pages;
           this.liveNotes = data.n_notes;
+          this.liveEvents = data.notes;
         }
       } finally {
         this.liveBusy = false;
@@ -448,8 +472,54 @@ createApp({
     stopLive() {
       clearInterval(this.timerId);
       clearInterval(this.liveTimerId);
+      cancelAnimationFrame(this.rollRaf);
       this.recorder.stop(); // onstop triggers the final full-quality pass
       this.state = "processing";
+    },
+    drawRoll() {
+      if (this.state !== "live") return;
+      const canvas = this.$refs.roll;
+      if (canvas) {
+        const dpr = window.devicePixelRatio || 1;
+        const w = canvas.clientWidth, h = canvas.clientHeight;
+        if (canvas.width !== Math.round(w * dpr)) {
+          canvas.width = Math.round(w * dpr);
+          canvas.height = Math.round(h * dpr);
+        }
+        const ctx = canvas.getContext("2d");
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, w, h);
+        const css = getComputedStyle(document.documentElement);
+        const accent = css.getPropertyValue("--accent").trim();
+        const border = css.getPropertyValue("--border").trim();
+        const muted = css.getPropertyValue("--muted").trim();
+        const SPAN = 12; // seconds visible
+        const LO = 21, HI = 108; // piano range
+        const now = (performance.now() - this.liveStart) / 1000;
+        const t0 = now - SPAN;
+        const rowH = h / (HI - LO + 1);
+        ctx.strokeStyle = border;
+        ctx.lineWidth = 1;
+        for (let p = 24; p <= HI; p += 12) { // C guide lines, one per octave
+          const y = Math.round(h - (p - LO + 1) * rowH) + 0.5;
+          ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+        }
+        ctx.fillStyle = accent;
+        for (const [onset, offset, pitch, velocity] of this.liveEvents) {
+          if (offset < t0) continue;
+          const x = Math.max(0, ((onset - t0) / SPAN) * w);
+          const xw = Math.max(2, ((Math.min(offset, now) - Math.max(onset, t0)) / SPAN) * w);
+          const y = h - (pitch - LO + 1) * rowH;
+          ctx.globalAlpha = 0.35 + 0.65 * (velocity / 127);
+          ctx.fillRect(x, y + 0.5, xw, Math.max(2, rowH - 1));
+        }
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = muted; // playhead on the right edge
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.moveTo(w - 1.5, 0); ctx.lineTo(w - 1.5, h); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      this.rollRaf = requestAnimationFrame(() => this.drawRoll());
     },
 
     // ---- upload ----

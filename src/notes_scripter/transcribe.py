@@ -16,9 +16,11 @@ log = structlog.get_logger()
 
 SAMPLE_RATE = 16000  # the model's expected sample rate
 
-# Effort tiers = segment hop fraction. Inference runs 10 s windows; smaller hop means
-# more overlapping passes averaged together: better predictions, proportionally slower.
+# "ultra" runs Spotify's tiny Basic Pitch model (see ultra.py): ~50x real-time, roughest.
+# The other tiers = ByteDance segment hop fraction. Inference runs 10 s windows; smaller
+# hop means more overlapping passes averaged together: better predictions, slower.
 EFFORT_HOP = {"fast": 1.0, "balanced": 0.5, "best": 0.25}
+EFFORTS = ("ultra", *EFFORT_HOP)
 DEFAULT_EFFORT = "balanced"
 
 _transcriptor = None  # lazily-loaded singleton (the checkpoint is ~165 MB)
@@ -140,8 +142,12 @@ def transcribe_array(
     audio: np.ndarray, effort: str = DEFAULT_EFFORT, midi_path: Path | None = None
 ) -> tuple[list[NoteEvent], list[dict]]:
     """Audio samples (16 kHz mono) -> sorted note events + pedal events."""
-    if effort not in EFFORT_HOP:
-        raise ValueError(f"effort must be one of {sorted(EFFORT_HOP)}, got {effort!r}")
+    if effort not in EFFORTS:
+        raise ValueError(f"effort must be one of {sorted(EFFORTS)}, got {effort!r}")
+    if effort == "ultra":
+        from . import ultra  # deferred: avoids a circular import
+
+        return ultra.transcribe_events(audio), []
     transcriptor = _get_transcriptor()
     output_dict = _run_model(transcriptor, audio, EFFORT_HOP[effort])
     note_events, pedal_events = _postprocess(transcriptor, output_dict, midi_path)
@@ -162,8 +168,8 @@ def transcribe(
     audio_path: Path, midi_path: Path | None = None, effort: str = DEFAULT_EFFORT
 ) -> TranscriptionResult:
     """Run the full audio -> note-events step and optionally write raw performance MIDI."""
-    if effort not in EFFORT_HOP:
-        raise ValueError(f"effort must be one of {sorted(EFFORT_HOP)}, got {effort!r}")
+    if effort not in EFFORTS:
+        raise ValueError(f"effort must be one of {sorted(EFFORTS)}, got {effort!r}")
     audio = trim_silence(load_audio(audio_path))
     duration = len(audio) / SAMPLE_RATE
     tempo = estimate_tempo(audio)

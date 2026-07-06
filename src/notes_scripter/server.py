@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,13 +15,15 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import pipeline, score, transcribe
-from .transcribe import DEFAULT_EFFORT, EFFORT_HOP, SAMPLE_RATE
+from . import pipeline, score, transcribe, ultra
+from .transcribe import DEFAULT_EFFORT, EFFORTS, SAMPLE_RATE
 
 log = structlog.get_logger()
 
 STATIC_DIR = Path(__file__).parent / "static"
-LIVE_BLOCK_SAMPLES = SAMPLE_RATE * 10  # the model's native 10 s window
+LIVE_CONTEXT_SECONDS = 2.0  # reprocessed tail: lets note offsets refine on later passes
+LIVE_MIN_NEW_SECONDS = 0.3  # skip a pass when almost no new audio arrived
+LIVE_ENGRAVE_INTERVAL = 3.0  # seconds between engraved-draft refreshes
 
 app = FastAPI(title="NotesScripter", docs_url=None, redoc_url=None)
 
@@ -46,9 +49,12 @@ class Job:
 class LiveSession:
     dir: Path
     processed_samples: int = 0
-    events: list[transcribe.NoteEvent] = field(default_factory=list)
+    # keyed by (pitch, onset in 50 ms ticks): re-detections refine still-sounding notes
+    events: dict[tuple[int, int], transcribe.NoteEvent] = field(default_factory=dict)
     bpm: float | None = None
     svg_pages: list[str] = field(default_factory=list)
+    last_engrave: float = 0.0
+    engraved_notes: int = 0
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
@@ -66,7 +72,7 @@ def _job_payload(job_id: str, job: Job) -> dict:
     return {
         "id": job_id,
         "effort": job.effort,
-        "cached_efforts": [e for e in EFFORT_HOP if e in job.cache],
+        "cached_efforts": [e for e in EFFORTS if e in job.cache],
         "svg_pages": job.out.svg_pages,
         "tempo_bpm": job.out.tempo_bpm,
         "key": job.out.key,
@@ -100,8 +106,8 @@ async def transcribe_endpoint(
     title: str = Form("Transcription"),
     author: str = Form(""),
 ):
-    if effort not in EFFORT_HOP:
-        raise HTTPException(status_code=422, detail=f"effort must be one of {sorted(EFFORT_HOP)}")
+    if effort not in EFFORTS:
+        raise HTTPException(status_code=422, detail=f"effort must be one of {sorted(EFFORTS)}")
     title = title.strip() or "Transcription"
     author = author.strip()
     job_id = uuid.uuid4().hex[:12]
@@ -135,8 +141,8 @@ async def update_job(
     job = _jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404)
-    if effort is not None and effort not in EFFORT_HOP:
-        raise HTTPException(status_code=422, detail=f"effort must be one of {sorted(EFFORT_HOP)}")
+    if effort is not None and effort not in EFFORTS:
+        raise HTTPException(status_code=422, detail=f"effort must be one of {sorted(EFFORTS)}")
     job.title = title.strip() or "Transcription"
     job.author = author.strip()
     if bpm is not None:
@@ -169,25 +175,33 @@ async def live_start():
 
 
 def _live_process(session: LiveSession, blob: bytes) -> None:
-    """Decode the full recording so far; transcribe any new complete 10 s blocks."""
+    """Decode the recording so far; run Basic Pitch on the trailing window (~50x real-time)."""
     audio_path = session.dir / "live.webm"
     audio_path.write_bytes(blob)
     audio = transcribe.load_audio(audio_path)
-    while len(audio) - session.processed_samples >= LIVE_BLOCK_SAMPLES:
-        start = session.processed_samples
-        block = audio[start : start + LIVE_BLOCK_SAMPLES]
-        notes, _ = transcribe.transcribe_array(block, effort="fast")
-        offset = start / SAMPLE_RATE
-        for n in notes:
-            session.events.append(
-                transcribe.NoteEvent(n.onset + offset, n.offset + offset, n.pitch, n.velocity)
-            )
-        session.processed_samples += LIVE_BLOCK_SAMPLES
-        if session.bpm is None:
-            session.bpm = transcribe.estimate_tempo(audio[: session.processed_samples])
-    if session.events:
-        qnotes = score.quantize(session.events, session.bpm or 120.0)
+    if len(audio) - session.processed_samples < LIVE_MIN_NEW_SECONDS * SAMPLE_RATE:
+        return
+    start = max(0, session.processed_samples - int(LIVE_CONTEXT_SECONDS * SAMPLE_RATE))
+    # melodia_trick off: it invents onset-less notes, re-triggering held notes every pass
+    notes = ultra.transcribe_events(audio[start:], melodia_trick=False)
+    offset = start / SAMPLE_RATE
+    for n in notes:
+        event = transcribe.NoteEvent(n.onset + offset, n.offset + offset, n.pitch, n.velocity)
+        tick = round(event.onset * 20)
+        keys = ((n.pitch, tick), (n.pitch, tick - 1), (n.pitch, tick + 1))
+        key = next((k for k in keys if k in session.events), keys[0])
+        session.events[key] = event
+    session.processed_samples = len(audio)
+    if session.bpm is None and len(audio) >= SAMPLE_RATE * 5:
+        session.bpm = transcribe.estimate_tempo(audio)
+
+    now = time.monotonic()
+    stale = len(session.events) != session.engraved_notes
+    if session.events and stale and now - session.last_engrave >= LIVE_ENGRAVE_INTERVAL:
+        qnotes = score.quantize(list(session.events.values()), session.bpm or 120.0)
         session.svg_pages = pipeline.draft_svgs(qnotes, session.bpm or 120.0, session.dir)
+        session.last_engrave = now
+        session.engraved_notes = len(session.events)
 
 
 @app.post("/api/live/{session_id}/chunk")
@@ -203,9 +217,11 @@ async def live_chunk(session_id: str, file: UploadFile):
             log.exception("live_chunk_failed", session=session_id)
         finally:
             session.lock.release()
+    events = sorted(session.events.values(), key=lambda n: (n.onset, n.pitch))
     return {
         "svg_pages": session.svg_pages,
-        "n_notes": len(session.events),
+        "notes": [[round(n.onset, 3), round(n.offset, 3), n.pitch, n.velocity] for n in events],
+        "n_notes": len(events),
         "processed_seconds": session.processed_samples / SAMPLE_RATE,
     }
 

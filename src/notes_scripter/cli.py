@@ -33,6 +33,7 @@ def serve(
 
 
 class Effort(str, Enum):
+    ultra = "ultra"
     fast = "fast"
     balanced = "balanced"
     best = "best"
@@ -44,7 +45,9 @@ def transcribe(
     out: Path = typer.Option(Path("output"), help="Output directory."),
     title: str = typer.Option("Transcription", help="Score title."),
     effort: Effort = typer.Option(
-        Effort.balanced, help="fast: ~2x faster | balanced | best: ~2x slower, most accurate."
+        Effort.balanced,
+        help="ultra: near-instant, roughest | fast: ~2x faster | balanced | "
+        "best: ~2x slower, most accurate.",
     ),
 ):
     """Transcribe an audio file to MIDI + MusicXML + PDF."""
