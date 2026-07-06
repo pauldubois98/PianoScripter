@@ -35,7 +35,13 @@ url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.8"]
+dev = [
+    "onnx>=1.22.0",
+    "onnxconverter-common>=1.16.0",
+    "onnxscript>=0.7.1",
+    "pytest>=8",
+    "ruff>=0.8",
+]
 
 [tool.ruff]
 line-length = 100

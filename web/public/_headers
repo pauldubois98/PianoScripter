@@ -1,0 +1,5 @@
+# Netlify/Cloudflare Pages headers: cross-origin isolation enables
+# multi-threaded WASM (SharedArrayBuffer) for onnxruntime-web.
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: credentialless

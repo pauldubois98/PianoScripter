@@ -15,3 +15,10 @@ output/
 
 # OS
 .DS_Store
+
+# Web app
+web/node_modules/
+web/dist/
+# ByteDance ONNX exports are too large for git: hosted on Hugging Face Hub
+# (regenerate locally with: uv run python tools/export_onnx.py)
+web/public/models/bytedance-*.onnx

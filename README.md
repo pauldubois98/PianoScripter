@@ -1,87 +1,99 @@
 # 🎹 NotesScripter
 
-Play the piano, get the sheet music — **entirely on your device**. Audio is recorded (or
-uploaded) in a local web app, transcribed with the ByteDance high-resolution piano
-transcription model, quantized into notation, and exported as **PDF, MIDI and MusicXML**.
-Nothing is ever sent to a server: the app binds to `127.0.0.1` only.
+Play the piano, get the sheet music — **entirely on your device**. The app is a
+**static website**: audio is recorded (or uploaded) in the browser, transcribed
+in-browser with ONNX models (WebAssembly), quantized into notation, engraved with
+Verovio, and exported as **PDF, MIDI and MusicXML**. Nothing is ever sent to a
+server — there is no server.
 
-## Quick start
-
-```bash
-uv sync
-uv run notes-scripter serve   # opens http://127.0.0.1:8321 in your browser
-```
-
-Record from the microphone, start a **live session** (notes appear on a piano roll about
-a second after you play them, with a full-quality pass when you stop), or drop an audio file
-(WAV, MP3, FLAC, OGG, WebM…). Leading/trailing silence is trimmed automatically.
-The first transcription downloads the model checkpoint (~165 MB) to
-`~/piano_transcription_inference_data/`; after that everything works offline.
-
-To touch up a transcription, download the MusicXML and open it in MuseScore or any
-notation editor.
-
-There is also a CLI:
+## Quick start (web app)
 
 ```bash
-uv run notes-scripter transcribe recording.wav --out output/
+cd web
+npm install
+npm run dev        # http://localhost:5173
 ```
+
+Record from the microphone, start a **live session** (notes appear on a piano roll
+about a second after you play them, with a full-quality pass when you stop), or drop
+an audio file (WAV, MP3, FLAC, OGG, WebM…). Leading/trailing silence is trimmed
+automatically. Title, author and BPM are editable after transcription; switching
+back to an already-computed effort swaps the score instantly.
+
+`npm run build` emits a fully static `dist/` deployable to GitHub Pages, Netlify or
+any static host (a workflow in `.github/workflows/deploy.yml` deploys `main` to Pages).
 
 ## How it works
 
 ```mermaid
 flowchart LR
-    A[🎙️ Audio<br/>mic or file] -->|ffmpeg decode| B[16 kHz mono]
-    B -->|ByteDance CRNN<br/>fast · balanced · best| C[Note events<br/>onset · offset · pitch · velocity]
+    A[🎙️ Audio<br/>mic or file] -->|WebAudio decode| B[16 kHz mono]
+    B -->|ByteDance CRNN ONNX<br/>fast · balanced · best| C[Note events<br/>onset · offset · pitch · velocity]
     B -->|Basic Pitch ONNX<br/>ultra · live roll| C
-    B -->|librosa beat tracking| D[Tempo estimate]
-    C --> E[music21 score<br/>quantization · hand split · key]
+    B -->|onset autocorrelation| D[Tempo estimate]
+    C --> E[JS score engine<br/>quantization · hand split · key]
     D --> E
     E --> F[MusicXML]
-    F -->|Verovio| G[SVG score]
-    G -->|cairosvg + pypdf| H[📄 PDF]
-    C -->|write_events_to_midi| I[🎹 MIDI]
+    F -->|Verovio WASM| G[SVG score]
+    G -->|jsPDF + svg2pdf| H[📄 PDF]
+    E -->|@tonejs/midi| I[🎹 MIDI]
 ```
+
+Everything above runs in the browser: the models via **onnxruntime-web** (WASM, in a
+web worker), the engraving via the **Verovio** WASM toolkit (in a second worker).
 
 ### Effort levels
 
-The **ultra** tier uses Spotify's tiny Basic Pitch model (~230 kB, via onnxruntime) — it
-is ~50× faster than real time, which is what makes the live view possible. The other
-tiers slide the ByteDance model's 10-second window over the recording; the effort
-setting controls how much the windows overlap and get averaged:
+The **ultra** tier uses Spotify's tiny Basic Pitch model (~230 kB, bundled with the
+site) — ~50× faster than real time, which is what makes the live view possible. The
+other tiers slide the ByteDance model's 10-second window over the recording; the
+effort setting controls how much the windows overlap and get averaged:
 
-| Effort | Engine | Speed | When to use |
+| Effort | Engine | Model download | When to use |
 |---|---|---|---|
-| 🚀 Ultra | Basic Pitch | near-instant | Live sessions, instant drafts |
-| ⚡ Fast | ByteDance, no overlap | ~2× faster | Quick drafts |
-| ⚖️ Balanced (default) | ByteDance, 50% hop | baseline | Everyday use |
-| ✨ Best | ByteDance, 25% hop | ~2× slower | Final scores, dense passages |
+| 🚀 Ultra | Basic Pitch | bundled (~230 kB) | Live sessions, instant drafts |
+| ⚡ Fast | ByteDance fp16, no overlap | ~90 MB (shared with Balanced) | Quick drafts |
+| ⚖️ Balanced (default) | ByteDance fp16, 50% hop | ~90 MB (shared with Fast) | Everyday use |
+| ✨ Best | ByteDance fp32, 25% hop | ~175 MB | Final scores, dense passages |
 
-Available in the UI (segmented control) and the CLI (`--effort ultra|fast|balanced|best`).
+Models are fetched on first use (same-origin `models/` first, then Hugging Face Hub),
+cached with the Cache API, and work offline afterwards. Multi-threaded WASM is enabled
+via COOP/COEP headers (`public/_headers` for Netlify) or `coi-serviceworker` on hosts
+that cannot set headers (GitHub Pages), with a single-threaded fallback.
 
-- `src/notes_scripter/transcribe.py` — audio decoding (ffmpeg), silence trimming, tempo estimation, model inference
-- `src/notes_scripter/ultra.py` — ultra tier: Basic Pitch model via ONNX (windowing + note decoding ported from spotify/basic-pitch, Apache-2.0)
-- `src/notes_scripter/score.py` — 16th-note quantization, chord grouping, hand split at middle C, key detection
-- `src/notes_scripter/render.py` — MusicXML → SVG pages → PDF
-- `src/notes_scripter/pipeline.py` — orchestration: quantized notes → score → all exports
-- `src/notes_scripter/server.py` — local FastAPI app: transcription jobs, live sessions, static UI (Vue 3 vendored)
-- `src/notes_scripter/cli.py` — `serve` and `transcribe` commands
+### Layout
 
-Live mode records in the browser and posts the audio to `127.0.0.1` every second; the
-ultra engine transcribes the trailing window (notes reach the on-screen piano roll about
-a second after being played) and the engraved draft re-renders every few seconds.
-Stopping triggers a normal transcription of the whole take at your selected effort tier.
+- `web/` — the static site (Vue 3 + Vite)
+  - `src/audio/` — decoding, silence trim, tempo estimation, mic capture (AudioWorklet)
+  - `src/engine/` — the two workers plus the ports: `basicpitch(-dsp).js`,
+    `bytedance(-post).js`, `quantize.js`, `score.js`, `musicxml.js`, `keydetect.js`, `midi.js`
+  - `tests/` — vitest suite checking the JS ports against Python-generated fixtures
+- `tools/export_onnx.py` — exports the ByteDance PyTorch checkpoint to
+  `bytedance-fp32/fp16.onnx` (+ optional int8) with a PyTorch-parity gate
+- `tools/make_fixtures.py` — regenerates the JS test fixtures from the Python reference
+- `src/notes_scripter/` — the original Python implementation, kept as the reference
+  and for the CLI (`uv run notes-scripter transcribe recording.wav --out output/`);
+  the FastAPI server (`notes-scripter serve`) is legacy, superseded by the web app
 
 ## Development
 
 ```bash
-uv run pytest              # fast tests (no model needed)
-uv run pytest -m slow      # full end-to-end test (downloads the model)
-uv run ruff format . && uv run ruff check .
-git config core.hooksPath .githooks   # enable the pre-commit checks
+cd web
+npm test                                    # unit + parity tests
+npm run smoke -- --effort ultra song.wav    # real-browser end-to-end (needs Chrome)
+
+# Python reference / tooling
+uv run pytest
+uv run python tools/export_onnx.py --out web/public/models --verify clip.wav
+uv run python tools/make_fixtures.py
 ```
+
+The exported ByteDance models are not committed (see `.gitignore`); regenerate them
+locally with `tools/export_onnx.py`, or let the deployed site download them from the
+Hugging Face Hub mirror configured in `web/src/engine/models.js`.
 
 ## Roadmap
 
 See `docs/research-report.md` — notably per-piano calibration, smartphone-domain
-robustness, a real MIDI-to-score model (PM2S-style), and precision-tiered "effort" levels.
+robustness, a real MIDI-to-score model (PM2S-style), and WebGPU acceleration once
+its GRU support lands in onnxruntime-web.
