@@ -54,6 +54,11 @@ export const MESSAGES = {
     deleteChord: "Delete this note",
     moveEarlier: "Move earlier",
     moveLater: "Move later",
+    rhythmModeLabel: "Rhythm",
+    rhythmAdaptive: "🎼 Realistic",
+    rhythmAdaptiveHint: "Biases toward common rhythms (quarter/half/whole/eighth, beat and half-beat timing).",
+    rhythmRaw: "🎹 Raw",
+    rhythmRawHint: "Snaps each note independently to the nearest sixteenth note, no bias.",
   },
   fr: {
     subtitle: "Jouez du piano. Obtenez la partition.",
@@ -109,5 +114,10 @@ export const MESSAGES = {
     deleteChord: "Supprimer cette note",
     moveEarlier: "Avancer",
     moveLater: "Reculer",
+    rhythmModeLabel: "Rythme",
+    rhythmAdaptive: "🎼 Réaliste",
+    rhythmAdaptiveHint: "Privilégie les rythmes courants (croche/noire/blanche/ronde, temps et demi-temps).",
+    rhythmRaw: "🎹 Brut",
+    rhythmRawHint: "Aligne chaque note indépendamment sur la double-croche la plus proche, sans biais.",
   },
 };

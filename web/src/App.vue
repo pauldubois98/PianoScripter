@@ -7,7 +7,7 @@ import { estimateTempo } from "./audio/tempo.js";
 import { MicCapture } from "./audio/mic.js";
 import { transcribeAudio, renderScore } from "./engine/engine.js";
 import { LiveSession } from "./engine/live.js";
-import { quantize, MIN_QL, MAX_QL } from "./engine/quantize.js";
+import { quantize, quantizeAdaptive, MIN_QL, MAX_QL } from "./engine/quantize.js";
 import { buildMusicXml, midiName, durationLabel, ALLOWED_DURATIONS } from "./engine/musicxml.js";
 import { buildMidi } from "./engine/midi.js";
 
@@ -42,6 +42,7 @@ export default {
       updatingLabel: "",
       progress: null, // { stage: "download"|"infer", value: 0..1 }
       editing: false,
+      rhythmMode: localStorage.getItem("rhythmMode") || "adaptive", // "adaptive" | "raw"
       // recording / live
       mic: null,
       seconds: 0,
@@ -167,9 +168,16 @@ export default {
     async rebuild() {
       const res = this.resultCache[this.resultEffort];
       const bpm = this.bpmTouched ? this.bpm : this.tempoBpm;
-      this.qnotes = quantize(res.notes, bpm);
+      const quantizer = this.rhythmMode === "adaptive" ? quantizeAdaptive : quantize;
+      this.qnotes = quantizer(res.notes, bpm);
       this.editing = false; // a new note set invalidates manual edits
       await this.rebuildRender();
+    },
+    toggleRhythmMode() {
+      if (this.updating) return;
+      this.rhythmMode = this.rhythmMode === "adaptive" ? "raw" : "adaptive";
+      localStorage.setItem("rhythmMode", this.rhythmMode);
+      this.updateJob();
     },
     // Re-engraves the score from the current qnotes as-is (does not
     // re-quantize), so manual edits and title/author-only changes survive.
@@ -579,6 +587,22 @@ export default {
             </div>
           </div>
           <span class="hint">{{ efforts.find((e) => e.id === resultEffort).hint }}</span>
+        </div>
+        <div class="effort" style="margin-bottom:0">
+          <div class="effort-row">
+            <span class="effort-label">{{ msg.rhythmModeLabel }}</span>
+            <div class="segmented" role="radiogroup" :aria-label="msg.rhythmModeLabel">
+              <button :class="{ active: rhythmMode === 'adaptive' }" :disabled="updating"
+                      :title="msg.rhythmAdaptiveHint" @click="rhythmMode !== 'adaptive' && toggleRhythmMode()">
+                {{ msg.rhythmAdaptive }}
+              </button>
+              <button :class="{ active: rhythmMode === 'raw' }" :disabled="updating"
+                      :title="msg.rhythmRawHint" @click="rhythmMode !== 'raw' && toggleRhythmMode()">
+                {{ msg.rhythmRaw }}
+              </button>
+            </div>
+          </div>
+          <span class="hint">{{ rhythmMode === "adaptive" ? msg.rhythmAdaptiveHint : msg.rhythmRawHint }}</span>
         </div>
         <span class="meta-busy" v-if="updating">{{ updatingLabel }}</span>
         <div class="progress" v-if="updating && progress">
