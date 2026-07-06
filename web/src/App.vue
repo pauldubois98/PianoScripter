@@ -7,8 +7,8 @@ import { estimateTempo } from "./audio/tempo.js";
 import { MicCapture } from "./audio/mic.js";
 import { transcribeAudio, renderScore } from "./engine/engine.js";
 import { LiveSession } from "./engine/live.js";
-import { quantize } from "./engine/quantize.js";
-import { buildMusicXml } from "./engine/musicxml.js";
+import { quantize, MIN_QL, MAX_QL } from "./engine/quantize.js";
+import { buildMusicXml, midiName, durationLabel, ALLOWED_DURATIONS } from "./engine/musicxml.js";
 import { buildMidi } from "./engine/midi.js";
 
 const EFFORT_ICONS = { ultra: "🚀", fast: "⚡", balanced: "⚖️", best: "✨" };
@@ -41,6 +41,7 @@ export default {
       updating: false,
       updatingLabel: "",
       progress: null, // { stage: "download"|"infer", value: 0..1 }
+      editing: false,
       // recording / live
       mic: null,
       seconds: 0,
@@ -81,6 +82,16 @@ export default {
         ? this.msg.downloadingModel(pct)
         : this.msg.inferring(pct);
     },
+    rightEvents() {
+      return this.groupEvents("R");
+    },
+    leftEvents() {
+      return this.groupEvents("L");
+    },
+    pitchOptions() {
+      // A0..C8, the full piano range
+      return Array.from({ length: 88 }, (_, i) => i + 21);
+    },
   },
   mounted() {
     document.documentElement.dataset.theme = this.theme;
@@ -112,6 +123,7 @@ export default {
       this.bpm = 120;
       this.bpmTouched = false;
       this.progress = null;
+      this.editing = false;
     },
     effortSwapHint(id) {
       if (id === this.resultEffort) return this.msg.swapCurrent;
@@ -123,6 +135,7 @@ export default {
       this.state = "processing";
       this.error = null;
       this.progress = null;
+      this.editing = false;
       try {
         const trimmed = trimSilence(audio16k);
         if (!trimmed.length) throw new Error("empty audio");
@@ -155,6 +168,13 @@ export default {
       const res = this.resultCache[this.resultEffort];
       const bpm = this.bpmTouched ? this.bpm : this.tempoBpm;
       this.qnotes = quantize(res.notes, bpm);
+      this.editing = false; // a new note set invalidates manual edits
+      await this.rebuildRender();
+    },
+    // Re-engraves the score from the current qnotes as-is (does not
+    // re-quantize), so manual edits and title/author-only changes survive.
+    async rebuildRender() {
+      const bpm = this.bpmTouched ? this.bpm : this.tempoBpm;
       const { musicxml, key } = buildMusicXml(this.qnotes, bpm, {
         title: this.title || "Transcription",
         composer: this.author,
@@ -197,6 +217,124 @@ export default {
         this.updating = false;
         this.progress = null;
       }
+    },
+    // Title/author changes and manual note edits: re-engrave without
+    // touching the bpm/effort-derived note set.
+    async renderOnly() {
+      if (!this.audio || this.updating) return;
+      this.updating = true;
+      this.updatingLabel = this.msg.updating;
+      try {
+        await this.rebuildRender();
+      } catch (err) {
+        console.error(err);
+        this.error = this.msg.failed;
+      } finally {
+        this.updating = false;
+      }
+    },
+
+    // ---- note editing ----
+    groupEvents(hand) {
+      const map = new Map();
+      for (const q of this.qnotes) {
+        if (q.hand !== hand) continue;
+        if (!map.has(q.onsetQl)) map.set(q.onsetQl, { onsetQl: q.onsetQl, durQl: q.durQl, pitches: [] });
+        map.get(q.onsetQl).pitches.push(q.pitch);
+      }
+      return [...map.values()]
+        .sort((a, b) => a.onsetQl - b.onsetQl)
+        .map((ev) => ({ ...ev, pitches: [...ev.pitches].sort((a, b) => a - b) }));
+    },
+    durOptionsFor(durQl) {
+      const set = new Set(ALLOWED_DURATIONS);
+      set.add(durQl);
+      return [...set].sort((a, b) => b - a);
+    },
+    midiName,
+    durationLabel,
+    beatLabel(onsetQl) {
+      const measure = Math.floor(onsetQl / 4) + 1;
+      const beat = (onsetQl % 4) + 1;
+      return `${measure}.${beat}`;
+    },
+    // Every mutation goes through here: it normalizes the result (clips
+    // durations against the next onset per hand, re-sorts, re-ids) then
+    // re-engraves. Keeps individual edit methods free of that bookkeeping.
+    async editNotes(mutate) {
+      if (this.updating) return;
+      mutate();
+      this.normalizeQnotes();
+      this.updating = true;
+      this.updatingLabel = this.msg.updating;
+      try {
+        await this.rebuildRender();
+      } catch (err) {
+        console.error(err);
+        this.error = this.msg.failed;
+      } finally {
+        this.updating = false;
+      }
+    },
+    normalizeQnotes() {
+      for (const hand of ["R", "L"]) {
+        const onsets = [...new Set(this.qnotes.filter((q) => q.hand === hand).map((q) => q.onsetQl))]
+          .sort((a, b) => a - b);
+        onsets.forEach((onset, i) => {
+          const next = onsets[i + 1];
+          const cap = next != null ? next - onset : MAX_QL;
+          for (const q of this.qnotes) {
+            if (q.hand === hand && q.onsetQl === onset) {
+              q.durQl = Math.max(MIN_QL, Math.min(q.durQl, cap));
+            }
+          }
+        });
+      }
+      this.qnotes.sort((a, b) => a.onsetQl - b.onsetQl || a.hand.localeCompare(b.hand) || a.pitch - b.pitch);
+      this.qnotes.forEach((q, i) => (q.id = i));
+    },
+    setEventDuration(hand, onsetQl, durQl) {
+      this.editNotes(() => {
+        for (const q of this.qnotes) {
+          if (q.hand === hand && q.onsetQl === onsetQl) q.durQl = durQl;
+        }
+      });
+    },
+    moveEvent(hand, onsetQl, deltaQl) {
+      this.editNotes(() => {
+        const newOnset = Math.max(0, Math.round((onsetQl + deltaQl) * 4) / 4);
+        for (const q of this.qnotes) {
+          if (q.hand === hand && q.onsetQl === onsetQl) q.onsetQl = newOnset;
+        }
+      });
+    },
+    removePitch(hand, onsetQl, pitch) {
+      this.editNotes(() => {
+        this.qnotes = this.qnotes.filter((q) => !(q.hand === hand && q.onsetQl === onsetQl && q.pitch === pitch));
+      });
+    },
+    onAddPitch(hand, onsetQl, e) {
+      const pitch = Number(e.target.value);
+      e.target.value = "";
+      if (!pitch) return;
+      this.editNotes(() => {
+        if (this.qnotes.some((q) => q.hand === hand && q.onsetQl === onsetQl && q.pitch === pitch)) return;
+        const group = this.qnotes.filter((q) => q.hand === hand && q.onsetQl === onsetQl);
+        const durQl = group.length ? group[0].durQl : 1;
+        this.qnotes.push({ id: 0, hand, onsetQl, durQl, pitch, velocity: 80 });
+      });
+    },
+    deleteEvent(hand, onsetQl) {
+      this.editNotes(() => {
+        this.qnotes = this.qnotes.filter((q) => !(q.hand === hand && q.onsetQl === onsetQl));
+      });
+    },
+    addEvent(hand) {
+      this.editNotes(() => {
+        const handNotes = this.qnotes.filter((q) => q.hand === hand);
+        const onsetQl = handNotes.length ? Math.max(...handNotes.map((q) => q.onsetQl + q.durQl)) : 0;
+        this.qnotes.push({ id: 0, hand, onsetQl, durQl: 1, pitch: hand === "R" ? 60 : 48, velocity: 80 });
+      });
     },
 
     // ---- downloads (generated locally, on demand) ----
@@ -420,9 +558,9 @@ export default {
       <div class="card center">
         <div class="meta-edit">
           <input v-model.trim="title" :placeholder="msg.titlePlaceholder" :aria-label="msg.titlePlaceholder"
-                 :disabled="updating" @keyup.enter="$event.target.blur()" @change="updateJob()" />
+                 :disabled="updating" @keyup.enter="$event.target.blur()" @change="renderOnly()" />
           <input v-model.trim="author" :placeholder="msg.authorPlaceholder" :aria-label="msg.authorPlaceholder"
-                 :disabled="updating" @keyup.enter="$event.target.blur()" @change="updateJob()" />
+                 :disabled="updating" @keyup.enter="$event.target.blur()" @change="renderOnly()" />
           <label class="bpm-field">
             <input type="number" min="20" max="300" step="1" v-model.number="bpm" aria-label="BPM"
                    :disabled="updating" @keyup.enter="$event.target.blur()" @change="onBpmChange" />
@@ -455,7 +593,44 @@ export default {
           <button class="btn" @click="dlPdf">⬇ PDF</button>
           <button class="btn" @click="dlMidi">⬇ MIDI</button>
           <button class="btn" @click="dlMusicXml">⬇ MusicXML</button>
+          <button class="btn secondary" :disabled="updating" @click="editing = !editing">
+            {{ editing ? msg.doneEditing : msg.editScore }}
+          </button>
           <button class="btn secondary" @click="reset">{{ msg.newTranscription }}</button>
+        </div>
+      </div>
+
+      <div class="card editor" v-if="editing">
+        <div class="editor-hands">
+          <div class="editor-hand" v-for="hand in ['R', 'L']" :key="hand">
+            <div class="editor-hand-title">{{ hand === "R" ? msg.rightHand : msg.leftHand }}</div>
+            <div class="editor-event" v-for="ev in (hand === 'R' ? rightEvents : leftEvents)" :key="hand + ev.onsetQl">
+              <div class="editor-event-row">
+                <button class="mini" :disabled="updating || ev.onsetQl <= 0" :title="msg.moveEarlier"
+                        @click="moveEvent(hand, ev.onsetQl, -0.25)">◀</button>
+                <span class="editor-beat">{{ beatLabel(ev.onsetQl) }}</span>
+                <button class="mini" :disabled="updating" :title="msg.moveLater"
+                        @click="moveEvent(hand, ev.onsetQl, 0.25)">▶</button>
+                <select :value="ev.durQl" :disabled="updating"
+                        @change="setEventDuration(hand, ev.onsetQl, Number($event.target.value))">
+                  <option v-for="d in durOptionsFor(ev.durQl)" :key="d" :value="d">{{ durationLabel(d) }}</option>
+                </select>
+                <span class="editor-pitches">
+                  <span class="pitch-chip" v-for="p in ev.pitches" :key="p">
+                    {{ midiName(p) }}
+                    <button class="chip-x" :disabled="updating" @click="removePitch(hand, ev.onsetQl, p)">×</button>
+                  </span>
+                </span>
+                <select class="editor-add-pitch" :disabled="updating" @change="onAddPitch(hand, ev.onsetQl, $event)">
+                  <option value="">{{ msg.addPitch }}</option>
+                  <option v-for="p in pitchOptions" :key="p" :value="p">{{ midiName(p) }}</option>
+                </select>
+                <button class="mini danger" :disabled="updating" :title="msg.deleteChord"
+                        @click="deleteEvent(hand, ev.onsetQl)">🗑</button>
+              </div>
+            </div>
+            <button class="btn secondary small" :disabled="updating" @click="addEvent(hand)">{{ msg.addChord }}</button>
+          </div>
         </div>
       </div>
 

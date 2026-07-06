@@ -17,6 +17,24 @@ const TYPE_FOR_QL = new Map([
   [0.25, ["16th", 0]],
 ]);
 
+// Duration options offered by the note editor, largest first.
+export const ALLOWED_DURATIONS = [...TYPE_FOR_QL.keys()];
+
+/** Human label for a quarter-length duration, e.g. 1.5 -> "quarter." */
+export function durationLabel(ql) {
+  const entry = TYPE_FOR_QL.get(ql);
+  if (!entry) return `${ql}q`;
+  const [type, dots] = entry;
+  return type + (dots ? "." : "");
+}
+
+const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+/** MIDI number -> display name, e.g. 60 -> "C4". Display only (always sharps). */
+export function midiName(midi) {
+  return `${NOTE_NAMES[midi % 12]}${Math.floor(midi / 12) - 1}`;
+}
+
 const SHARP_SPELLINGS = [
   ["C", 0], ["C", 1], ["D", 0], ["D", 1], ["E", 0], ["F", 0],
   ["F", 1], ["G", 0], ["G", 1], ["A", 0], ["A", 1], ["B", 0],
