@@ -55,7 +55,7 @@
     min-height: 100vh; display: flex; flex-direction: column;
   }
   header { padding: 2.2rem 1rem 0.4rem; text-align: center; }
-  .theme-toggle {
+  .theme-toggle, .lang-toggle {
     position: fixed; top: 1rem; right: 1rem; z-index: 10;
     width: 42px; height: 42px; border-radius: 50%;
     border: 1px solid var(--border); background: var(--card); color: var(--text);
@@ -63,7 +63,8 @@
     display: flex; align-items: center; justify-content: center;
     transition: border-color .15s;
   }
-  .theme-toggle:hover { border-color: var(--accent); }
+  .theme-toggle:hover, .lang-toggle:hover { border-color: var(--accent); }
+  .lang-toggle { right: 4.4rem; font-size: .8rem; font-weight: 700; letter-spacing: .02em; }
   header h1 { font-size: 1.7rem; letter-spacing: -0.02em; }
   header p { color: var(--muted); margin-top: .35rem; font-size: .95rem; }
   .badge {
@@ -173,14 +174,17 @@
 </head>
 <body>
 <div id="app">
-  <button class="theme-toggle" :aria-label="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
-          :title="theme === 'dark' ? 'Light mode' : 'Dark mode'" @click="toggleTheme">
+  <button class="theme-toggle" :aria-label="theme === 'dark' ? msg.themeLight : msg.themeDark"
+          :title="theme === 'dark' ? msg.themeLight : msg.themeDark" @click="toggleTheme">
     {{ theme === "dark" ? "☀️" : "🌙" }}
+  </button>
+  <button class="lang-toggle" :aria-label="msg.langTitle" :title="msg.langTitle" @click="toggleLang">
+    {{ lang === "fr" ? "EN" : "FR" }}
   </button>
   <header>
     <h1>🎹 NotesScripter</h1>
-    <p>Play the piano. Get the sheet music.</p>
-    <span class="badge">🔒 100% on-device — audio never leaves this computer</span>
+    <p>{{ msg.subtitle }}</p>
+    <span class="badge">{{ msg.badge }}</span>
   </header>
 
   <main>
@@ -188,8 +192,8 @@
     <div class="card" v-if="state === 'idle'">
       <div class="effort">
         <div class="effort-row">
-          <span class="effort-label">Effort</span>
-          <div class="segmented" role="radiogroup" aria-label="Transcription effort">
+          <span class="effort-label">{{ msg.effortLabel }}</span>
+          <div class="segmented" role="radiogroup" :aria-label="msg.effortAria">
             <button v-for="opt in efforts" :key="opt.id"
                     :class="{ active: effort === opt.id }"
                     :title="opt.hint" @click="effort = opt.id">
@@ -202,25 +206,25 @@
       <div class="actions">
         <button class="action" @click="startRecording">
           <span class="icon">🎙️</span>
-          <span><strong>Record</strong></span>
-          <small>Use the microphone</small>
+          <span><strong>{{ msg.record }}</strong></span>
+          <small>{{ msg.recordSub }}</small>
         </button>
         <button class="action" @click="startLive">
           <span class="icon">🔴</span>
-          <span><strong>Live session</strong></span>
-          <small>See the notes the moment you play them</small>
+          <span><strong>{{ msg.live }}</strong></span>
+          <small>{{ msg.liveSub }}</small>
         </button>
         <label class="action" :class="{ dragover: dragging }"
                @dragover.prevent="dragging = true" @dragleave="dragging = false"
                @drop.prevent="onDrop">
           <span class="icon">📁</span>
-          <span><strong>Upload a recording</strong></span>
-          <small>WAV, MP3, FLAC, OGG… — click or drop a file</small>
+          <span><strong>{{ msg.upload }}</strong></span>
+          <small>{{ msg.uploadSub }}</small>
           <input type="file" accept="audio/*" @change="onPick" />
         </label>
       </div>
       <p class="hint" style="text-align:center; margin-top:1.4rem" v-if="error === null">
-        The first transcription downloads the model (~165 MB), then everything works offline.
+        {{ msg.firstRun }}
       </p>
       <p class="error" style="text-align:center; margin-top:1.4rem" v-else>{{ error }}</p>
     </div>
@@ -228,50 +232,46 @@
     <!-- recording -->
     <div class="card center" v-else-if="state === 'recording'">
       <div style="display:flex; align-items:center; gap:.7rem">
-        <span class="rec-dot"></span><strong>Recording…</strong>
+        <span class="rec-dot"></span><strong>{{ msg.recording }}</strong>
       </div>
       <div class="timer">{{ timerLabel }}</div>
-      <p class="hint">Play your piece, then stop when you're done.</p>
-      <button class="btn danger" @click="stopRecording">■ Stop &amp; transcribe</button>
+      <p class="hint">{{ msg.recordingHint }}</p>
+      <button class="btn danger" @click="stopRecording">{{ msg.stopTranscribe }}</button>
     </div>
 
     <!-- live -->
     <div v-else-if="state === 'live'">
       <div class="card center">
         <div style="display:flex; align-items:center; gap:.7rem">
-          <span class="rec-dot"></span><strong>Live session</strong>
+          <span class="rec-dot"></span><strong>{{ msg.live }}</strong>
         </div>
         <div class="timer">{{ timerLabel }}</div>
-        <p class="hint">
-          Notes land on the roll moments after you play them ({{ liveNotes }} so far).
-          Stopping runs a final {{ currentEffort.name.toLowerCase() }}-quality pass.
-        </p>
-        <button class="btn danger" @click="stopLive">■ Stop &amp; finalize</button>
+        <p class="hint">{{ msg.liveHint(liveNotes, currentEffort.name.toLowerCase()) }}</p>
+        <button class="btn danger" @click="stopLive">{{ msg.stopFinalize }}</button>
       </div>
       <div class="roll-wrap"><canvas ref="roll"></canvas></div>
       <div class="pages" v-if="liveSvgs.length">
         <div class="page" v-for="(svg, i) in liveSvgs" :key="i" v-html="svg"></div>
       </div>
       <p class="hint" style="text-align:center; margin-top:1.4rem" v-else>
-        🎧 The engraved draft appears after a few seconds of playing.
+        {{ msg.liveWaiting }}
       </p>
     </div>
 
     <!-- processing -->
     <div class="card center" v-else-if="state === 'processing'">
       <div class="spinner"></div>
-      <strong>Transcribing…</strong>
-      <p class="hint">Detecting notes → quantizing rhythm → engraving the score.<br/>
-        First run may take longer while the model downloads.</p>
+      <strong>{{ msg.transcribing }}</strong>
+      <p class="hint">{{ msg.processingHint }}<br/>{{ msg.processingFirst }}</p>
     </div>
 
     <!-- result -->
     <div v-else-if="state === 'done'">
       <div class="card center">
         <div class="meta-edit">
-          <input v-model.trim="title" placeholder="Title" aria-label="Title"
+          <input v-model.trim="title" :placeholder="msg.titlePlaceholder" :aria-label="msg.titlePlaceholder"
                  :disabled="updating" @keyup.enter="$event.target.blur()" @change="updateJob()" />
-          <input v-model.trim="author" placeholder="Author (optional)" aria-label="Author"
+          <input v-model.trim="author" :placeholder="msg.authorPlaceholder" :aria-label="msg.authorPlaceholder"
                  :disabled="updating" @keyup.enter="$event.target.blur()" @change="updateJob()" />
           <label class="bpm-field">
             <input type="number" min="20" max="300" step="1" v-model.number="bpm" aria-label="BPM"
@@ -281,8 +281,8 @@
         </div>
         <div class="effort" style="margin-bottom:0">
           <div class="effort-row">
-            <span class="effort-label">Effort</span>
-            <div class="segmented" role="radiogroup" aria-label="Transcription effort">
+            <span class="effort-label">{{ msg.effortLabel }}</span>
+            <div class="segmented" role="radiogroup" :aria-label="msg.effortAria">
               <button v-for="opt in efforts" :key="opt.id"
                       :class="{ active: result.effort === opt.id }" :disabled="updating"
                       :title="effortSwapHint(opt.id)" @click="changeEffort(opt.id)">
@@ -295,14 +295,14 @@
         <span class="meta-busy" v-if="updating">{{ updatingLabel }}</span>
         <div class="chips">
           <span class="chip">⏱️ {{ result.duration }} s</span>
-          <span class="chip">🎵 {{ result.n_notes }} notes</span>
+          <span class="chip">🎵 {{ result.n_notes }} {{ msg.notes }}</span>
           <span class="chip" v-if="result.key">🔑 {{ result.key }}</span>
         </div>
         <div class="downloads">
           <a class="btn" :href="dl('pdf')" download>⬇ PDF</a>
           <a class="btn" :href="dl('midi')" download>⬇ MIDI</a>
           <a class="btn" :href="dl('musicxml')" download>⬇ MusicXML</a>
-          <button class="btn secondary" @click="reset">↺ New transcription</button>
+          <button class="btn secondary" @click="reset">{{ msg.newTranscription }}</button>
         </div>
       </div>
 
@@ -312,12 +312,105 @@
     </div>
   </main>
 
-  <footer>NotesScripter — open source, local-first piano transcription.</footer>
+  <footer>{{ msg.footer }}</footer>
 </div>
 
 <script src="vue.global.prod.js"></script>
 <script>
 const { createApp } = Vue;
+
+const EFFORT_ICONS = { ultra: "🚀", fast: "⚡", balanced: "⚖️", best: "✨" };
+
+const MESSAGES = {
+  en: {
+    subtitle: "Play the piano. Get the sheet music.",
+    badge: "🔒 100% on-device — audio never leaves this computer",
+    effortLabel: "Effort",
+    effortAria: "Transcription effort",
+    efforts: {
+      ultra: { name: "Ultra", hint: "Near-instant — the engine behind live sessions; roughest score." },
+      fast: { name: "Fast", hint: "About twice as fast — good for a quick draft." },
+      balanced: { name: "Balanced", hint: "The standard accuracy/speed trade-off." },
+      best: { name: "Best", hint: "About twice as slow — averages more passes for the cleanest score." },
+    },
+    record: "Record",
+    recordSub: "Use the microphone",
+    live: "Live session",
+    liveSub: "See the notes the moment you play them",
+    upload: "Upload a recording",
+    uploadSub: "WAV, MP3, FLAC, OGG… — click or drop a file",
+    firstRun: "The first transcription downloads the model (~165 MB), then everything works offline.",
+    micDenied: "Microphone access was denied.",
+    failed: "Transcription failed — check the terminal logs and try again.",
+    recording: "Recording…",
+    recordingHint: "Play your piece, then stop when you're done.",
+    stopTranscribe: "■ Stop & transcribe",
+    liveHint: (n, effort) =>
+      `Notes land on the roll moments after you play them (${n} so far). Stopping runs a final ${effort}-quality pass.`,
+    stopFinalize: "■ Stop & finalize",
+    liveWaiting: "🎧 The engraved draft appears after a few seconds of playing.",
+    transcribing: "Transcribing…",
+    processingHint: "Detecting notes → quantizing rhythm → engraving the score.",
+    processingFirst: "First run may take longer while the model downloads.",
+    titlePlaceholder: "Title",
+    authorPlaceholder: "Author (optional)",
+    notes: "notes",
+    newTranscription: "↺ New transcription",
+    updating: "Updating the score…",
+    retranscribing: (effort) => `Re-transcribing at ${effort} effort — this runs the model again…`,
+    swapCurrent: "Current effort",
+    swapInstant: "Already computed — swaps instantly",
+    swapRerun: "Re-runs the transcription at this effort",
+    footer: "NotesScripter — open source, local-first piano transcription.",
+    themeLight: "Light mode",
+    themeDark: "Dark mode",
+    langTitle: "Passer en français",
+  },
+  fr: {
+    subtitle: "Jouez du piano. Obtenez la partition.",
+    badge: "🔒 100 % local — l'audio ne quitte jamais cet ordinateur",
+    effortLabel: "Effort",
+    effortAria: "Effort de transcription",
+    efforts: {
+      ultra: { name: "Ultra", hint: "Quasi instantané — le moteur des sessions live ; partition la plus approximative." },
+      fast: { name: "Rapide", hint: "Environ deux fois plus rapide — idéal pour un brouillon." },
+      balanced: { name: "Équilibré", hint: "Le compromis précision/vitesse standard." },
+      best: { name: "Optimal", hint: "Environ deux fois plus lent — moyenne plus de passes pour la partition la plus propre." },
+    },
+    record: "Enregistrer",
+    recordSub: "Utiliser le microphone",
+    live: "Session live",
+    liveSub: "Voyez les notes à l'instant où vous les jouez",
+    upload: "Importer un enregistrement",
+    uploadSub: "WAV, MP3, FLAC, OGG… — cliquez ou déposez un fichier",
+    firstRun: "La première transcription télécharge le modèle (~165 Mo), ensuite tout fonctionne hors ligne.",
+    micDenied: "L'accès au microphone a été refusé.",
+    failed: "La transcription a échoué — consultez les journaux du terminal et réessayez.",
+    recording: "Enregistrement…",
+    recordingHint: "Jouez votre morceau, puis arrêtez quand vous avez terminé.",
+    stopTranscribe: "■ Arrêter et transcrire",
+    liveHint: (n, effort) =>
+      `Les notes apparaissent sur le rouleau juste après avoir été jouées (${n} pour l'instant). L'arrêt lance une passe finale en qualité ${effort}.`,
+    stopFinalize: "■ Arrêter et finaliser",
+    liveWaiting: "🎧 La partition gravée apparaît après quelques secondes de jeu.",
+    transcribing: "Transcription…",
+    processingHint: "Détection des notes → quantification du rythme → gravure de la partition.",
+    processingFirst: "Le premier lancement peut être plus long pendant le téléchargement du modèle.",
+    titlePlaceholder: "Titre",
+    authorPlaceholder: "Auteur (facultatif)",
+    notes: "notes",
+    newTranscription: "↺ Nouvelle transcription",
+    retranscribing: (effort) => `Nouvelle transcription en effort ${effort} — le modèle est relancé…`,
+    updating: "Mise à jour de la partition…",
+    swapCurrent: "Effort actuel",
+    swapInstant: "Déjà calculé — bascule instantanée",
+    swapRerun: "Relance la transcription à cet effort",
+    footer: "NotesScripter — transcription piano open source, 100 % locale.",
+    themeLight: "Mode clair",
+    themeDark: "Mode sombre",
+    langTitle: "Switch to English",
+  },
+};
 
 createApp({
   data() {
@@ -325,13 +418,9 @@ createApp({
       state: "idle",       // idle | recording | live | processing | done
       theme: localStorage.getItem("theme")
         || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
+      lang: localStorage.getItem("lang")
+        || (navigator.language && navigator.language.toLowerCase().startsWith("fr") ? "fr" : "en"),
       effort: "balanced",
-      efforts: [
-        { id: "ultra", icon: "🚀", name: "Ultra", hint: "Near-instant — the engine behind live sessions; roughest score." },
-        { id: "fast", icon: "⚡", name: "Fast", hint: "About twice as fast — good for a quick draft." },
-        { id: "balanced", icon: "⚖️", name: "Balanced", hint: "The standard accuracy/speed trade-off." },
-        { id: "best", icon: "✨", name: "Best", hint: "About twice as slow — averages more passes for the cleanest score." },
-      ],
       dragging: false,
       error: null,
       result: null,
@@ -356,6 +445,16 @@ createApp({
     };
   },
   computed: {
+    msg() {
+      return MESSAGES[this.lang];
+    },
+    efforts() {
+      return Object.keys(EFFORT_ICONS).map((id) => ({
+        id,
+        icon: EFFORT_ICONS[id],
+        ...this.msg.efforts[id],
+      }));
+    },
     currentEffort() {
       return this.efforts.find((e) => e.id === this.effort);
     },
@@ -367,12 +466,18 @@ createApp({
   },
   mounted() {
     document.documentElement.dataset.theme = this.theme;
+    document.documentElement.lang = this.lang;
   },
   methods: {
     toggleTheme() {
       this.theme = this.theme === "dark" ? "light" : "dark";
       document.documentElement.dataset.theme = this.theme;
       localStorage.setItem("theme", this.theme);
+    },
+    toggleLang() {
+      this.lang = this.lang === "fr" ? "en" : "fr";
+      document.documentElement.lang = this.lang;
+      localStorage.setItem("lang", this.lang);
     },
     reset() {
       this.state = "idle";
@@ -389,10 +494,10 @@ createApp({
       this.bpm = Math.round(this.result.tempo_bpm);
     },
     effortSwapHint(id) {
-      if (id === this.result.effort) return "Current effort";
+      if (id === this.result.effort) return this.msg.swapCurrent;
       return this.result.cached_efforts.includes(id)
-        ? "Already computed — swaps instantly"
-        : "Re-runs the transcription at this effort";
+        ? this.msg.swapInstant
+        : this.msg.swapRerun;
     },
     changeEffort(id) {
       if (this.updating || id === this.result.effort) return;
@@ -410,8 +515,8 @@ createApp({
       const rerun = opt && !this.result.cached_efforts.includes(newEffort);
       this.updating = true;
       this.updatingLabel = rerun
-        ? `Re-transcribing at ${opt.name.toLowerCase()} effort — this runs the model again…`
-        : "Updating the score…";
+        ? this.msg.retranscribing(opt.name.toLowerCase())
+        : this.msg.updating;
       try {
         const form = new FormData();
         form.append("title", this.title || "Transcription");
@@ -445,7 +550,7 @@ createApp({
       this.error = null;
       let stream;
       try { stream = await this.getMic(); }
-      catch { this.error = "Microphone access was denied."; return; }
+      catch { this.error = this.msg.micDenied; return; }
       this.chunks = [];
       this.recorder = new MediaRecorder(stream);
       this.recorder.ondataavailable = (e) => e.data.size && this.chunks.push(e.data);
@@ -473,7 +578,7 @@ createApp({
       this.error = null;
       let stream;
       try { stream = await this.getMic(); }
-      catch { this.error = "Microphone access was denied."; return; }
+      catch { this.error = this.msg.micDenied; return; }
       const resp = await fetch("/api/live/start", { method: "POST" });
       this.liveId = (await resp.json()).id;
       this.liveSvgs = [];
@@ -589,7 +694,7 @@ createApp({
         this.syncFromResult();
         this.state = "done";
       } catch {
-        this.error = "Transcription failed — check the terminal logs and try again.";
+        this.error = this.msg.failed;
         this.state = "idle";
       }
     },
