@@ -48,6 +48,19 @@ flowchart LR
 Models are fetched on first use (same-origin `models/` first, then Hugging Face Hub), cached with the Cache API, and work offline afterwards.
 Multi-threaded WASM is enabled via COOP/COEP headers `coi-serviceworker` on hosts that cannot set headers (GitHub Pages), with a single-threaded fallback.
 
+### Rhythm
+The rhythm quantizer has two modes:
+- **🎹 Raw** snaps each note independently to the nearest sixteenth note, closest to the literal acoustic timing.
+- **🎼 Realistic** (default) biases toward the rhythms a person would actually write down (quarter/half/whole/eighth notes, beat and half-beat onsets), and calibrates a small tempo correction against the eighth-note grid.
+
+In Realistic mode, a **cleanup strength slider** (Subtle → Light → Balanced → Strong → Maximum) controls how hard that bias is applied:
+- Higher values snap more onsets onto beat/eighth-note positions, even at the cost of drifting a bit further from the raw detected timing. The payoff is cleaner, more readable notation.
+- Lower values stay closer to the sixteenth-note grid and the acoustic timing, at the cost of messier-looking rhythms (more syncopation, more unusual note values).
+- The same slider also controls **barline-sliver merging**: when a note is tied across a measure boundary and one side of the split is a musically-insignificant sliver (an artifact of quantization, not something a person would write), it's trimmed away so the note sits cleanly on one side of the barline instead of showing an awkward tiny tied fragment. Higher aggressiveness tolerates merging away larger slivers.
+
+Re-running with a different aggressiveness (or switching Realistic/Raw) only re-quantizes and re-engraves.
+It does not re-run the transcription model.
+
 ### Layout
 - `web/` — the static site (Vue 3 + Vite)
   - `src/audio/` — decoding, silence trim, tempo estimation, mic capture (AudioWorklet)
