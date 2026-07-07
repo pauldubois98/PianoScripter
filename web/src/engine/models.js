@@ -47,24 +47,26 @@ async function fetchWithProgress(url, onProgress) {
     received += value.length;
     onProgress?.(received / total);
   }
-  return buf.subarray(0, received);
+  // A stream can end early (dropped connection, flaky CDN) without the
+  // reader ever surfacing an error -- catch that here instead of handing a
+  // truncated model to the ONNX parser (and, worse, caching it forever).
+  if (received !== total) {
+    throw new Error(`incomplete download for ${url}: got ${received} of ${total} bytes`);
+  }
+  return buf;
 }
 
-async function loadModelBytes(file, onProgress) {
-  const localUrl = new URL(`models/${file}`, self.location.origin + basePath()).href;
-  const remoteUrl = REMOTE_BASE + file;
-  let cache = null;
-  try {
-    cache = await caches.open(CACHE_NAME);
-    for (const url of [localUrl, remoteUrl]) {
-      const hit = await cache.match(url);
-      if (hit) return new Uint8Array(await hit.arrayBuffer());
-    }
-  } catch {
-    // Cache API unavailable (e.g. private browsing): plain fetch below
+async function readFromCache(cache, urls) {
+  for (const url of urls) {
+    const hit = await cache?.match(url).catch(() => null);
+    if (hit) return { url, bytes: new Uint8Array(await hit.arrayBuffer()) };
   }
+  return null;
+}
+
+async function fetchFresh(cache, urls, onProgress) {
   let lastError;
-  for (const url of [localUrl, remoteUrl]) {
+  for (const url of urls) {
     try {
       const bytes = await fetchWithProgress(url, onProgress);
       try {
@@ -72,12 +74,30 @@ async function loadModelBytes(file, onProgress) {
       } catch {
         // quota exceeded: keep going without caching
       }
-      return bytes;
+      return { url, bytes };
     } catch (err) {
       lastError = err;
     }
   }
   throw lastError;
+}
+
+async function loadModelBytes(file, onProgress, { skipCache = false } = {}) {
+  const localUrl = new URL(`models/${file}`, self.location.origin + basePath()).href;
+  const remoteUrl = REMOTE_BASE + file;
+  const urls = [localUrl, remoteUrl];
+  let cache = null;
+  try {
+    cache = await caches.open(CACHE_NAME);
+  } catch {
+    // Cache API unavailable (e.g. private browsing): plain fetch below
+  }
+  if (cache && !skipCache) {
+    const hit = await readFromCache(cache, urls);
+    if (hit) return { ...hit, cache };
+  }
+  const fresh = await fetchFresh(cache, urls, onProgress);
+  return { ...fresh, cache };
 }
 
 function basePath() {
@@ -89,10 +109,20 @@ function basePath() {
 /** Get (or create) an inference session for a model file. */
 export async function getSession(file, onProgress) {
   if (sessions.has(file)) return sessions.get(file);
-  const bytes = await loadModelBytes(file, onProgress);
-  const session = await ort.InferenceSession.create(bytes, {
-    executionProviders: ["wasm"],
-  });
-  sessions.set(file, session);
-  return session;
+  const { bytes, url, cache } = await loadModelBytes(file, onProgress);
+  try {
+    const session = await ort.InferenceSession.create(bytes, { executionProviders: ["wasm"] });
+    sessions.set(file, session);
+    return session;
+  } catch {
+    // The bytes we just tried may be a truncated/corrupted entry cached by
+    // an older build (before the download-integrity check above existed).
+    // Drop it and retry once straight from the network so users self-heal
+    // instead of failing forever on every reload.
+    await cache?.delete(url).catch(() => {});
+    const retry = await loadModelBytes(file, onProgress, { skipCache: true });
+    const session = await ort.InferenceSession.create(retry.bytes, { executionProviders: ["wasm"] });
+    sessions.set(file, session);
+    return session;
+  }
 }
