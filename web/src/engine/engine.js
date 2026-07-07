@@ -53,3 +53,12 @@ export async function renderScore(musicxml, { title = "", composer = "" } = {}) 
   const { svgPages } = await engraver.request({ type: "render", musicxml, title, composer });
   return svgPages;
 }
+
+/**
+ * IDs of the notes/rests sounding at `ms` milliseconds into the currently
+ * rendered score (per the tempo baked into its MusicXML by buildMusicXml).
+ */
+export async function elementsAtTime(ms) {
+  const { elements } = await engraver.request({ type: "elementsAtTime", ms: Math.round(ms) });
+  return elements;
+}

@@ -59,6 +59,8 @@ export const MESSAGES = {
     rhythmAdaptiveHint: "Biases toward common rhythms (quarter/half/whole/eighth, beat and half-beat timing).",
     rhythmRaw: "🎹 Raw",
     rhythmRawHint: "Snaps each note independently to the nearest sixteenth note, no bias.",
+    playRecording: "Play recording",
+    pauseRecording: "Pause",
   },
   fr: {
     subtitle: "Jouez du piano. Obtenez la partition.",
@@ -119,5 +121,7 @@ export const MESSAGES = {
     rhythmAdaptiveHint: "Privilégie les rythmes courants (croche/noire/blanche/ronde, temps et demi-temps).",
     rhythmRaw: "🎹 Brut",
     rhythmRawHint: "Aligne chaque note indépendamment sur la double-croche la plus proche, sans biais.",
+    playRecording: "Écouter l'enregistrement",
+    pauseRecording: "Pause",
   },
 };

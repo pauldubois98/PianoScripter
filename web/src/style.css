@@ -108,12 +108,20 @@ main { flex: 1; width: 100%; max-width: 880px; margin: 0 auto; padding: 1.5rem 1
   border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
 }
 .downloads { display: flex; gap: .7rem; flex-wrap: wrap; justify-content: center; margin-top: 1rem; }
+.playback { display: flex; align-items: center; gap: .8rem; justify-content: center; margin-top: 1rem; }
+.playback-time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: .9rem; }
 .pages { margin-top: 1.6rem; display: flex; flex-direction: column; gap: 1.2rem; }
 .page {
+  position: relative;
   background: #fff; border: 1px solid var(--border); border-radius: 10px;
   overflow-x: auto; box-shadow: var(--shadow);
 }
-.page svg { display: block; width: 100%; height: auto; }
+.page-content svg { display: block; width: 100%; height: auto; }
+.playhead {
+  position: absolute; top: 0; bottom: 0; width: 3px;
+  background: var(--accent); border-radius: 2px; pointer-events: none;
+  box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 60%, transparent);
+}
 .error { color: var(--danger); font-weight: 600; }
 .hint { color: var(--muted); font-size: .88rem; }
 footer { text-align: center; padding: 1.2rem; color: var(--muted); font-size: .82rem; }

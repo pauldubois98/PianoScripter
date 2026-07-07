@@ -5,7 +5,7 @@ import { decodeToMono16k, SAMPLE_RATE } from "./audio/decode.js";
 import { trimSilence } from "./audio/trim.js";
 import { estimateTempo } from "./audio/tempo.js";
 import { MicCapture } from "./audio/mic.js";
-import { transcribeAudio, renderScore } from "./engine/engine.js";
+import { transcribeAudio, renderScore, elementsAtTime } from "./engine/engine.js";
 import { LiveSession } from "./engine/live.js";
 import { quantize, quantizeAdaptive, MIN_QL, MAX_QL } from "./engine/quantize.js";
 import { buildMusicXml, midiName, durationLabel, ALLOWED_DURATIONS } from "./engine/musicxml.js";
@@ -52,6 +52,18 @@ export default {
       liveEvents: [],
       liveStart: 0,
       rollRaf: null,
+      // playback of the recorded audio, with a cursor synced to the score
+      playing: false,
+      playOffset: 0, // seconds already played, used to resume after pause
+      playStartedAt: 0, // audioCtx.currentTime when the current segment started
+      audioCtx: null,
+      audioBuffer: null,
+      playSource: null,
+      playRaf: null,
+      playheadBusy: false,
+      playbackTime: 0,
+      playheadPage: null,
+      playheadLeft: 0,
     };
   },
   computed: {
@@ -110,6 +122,8 @@ export default {
       localStorage.setItem("lang", this.lang);
     },
     reset() {
+      this.stopPlayback();
+      this.audioBuffer = null;
       this.state = "idle";
       this.error = null;
       this.audio = null;
@@ -133,6 +147,8 @@ export default {
 
     // ---- pipeline (replaces the /api/transcribe + /update endpoints) ----
     async processAudio(audio16k) {
+      this.stopPlayback();
+      this.audioBuffer = null;
       this.state = "processing";
       this.error = null;
       this.progress = null;
@@ -182,6 +198,7 @@ export default {
     // Re-engraves the score from the current qnotes as-is (does not
     // re-quantize), so manual edits and title/author-only changes survive.
     async rebuildRender() {
+      this.stopPlayback(); // ids in the old SVG are about to become stale
       const bpm = this.bpmTouched ? this.bpm : this.tempoBpm;
       const { musicxml, key } = buildMusicXml(this.qnotes, bpm, {
         title: this.title || "Transcription",
@@ -461,6 +478,107 @@ export default {
       }
       await this.processAudio(audio);
     },
+
+    // ---- replay the recorded audio, with a cursor on the sheet music ----
+    formatTime(t) {
+      const s = Math.max(0, Math.floor(t || 0));
+      const m = String(Math.floor(s / 60)).padStart(2, "0");
+      return `${m}:${String(s % 60).padStart(2, "0")}`;
+    },
+    ensureAudioBuffer() {
+      if (!this.audioBuffer && this.audio) {
+        if (!this.audioCtx) this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const buffer = this.audioCtx.createBuffer(1, this.audio.length, SAMPLE_RATE);
+        buffer.copyToChannel(this.audio, 0);
+        this.audioBuffer = buffer;
+      }
+      return this.audioBuffer;
+    },
+    togglePlay() {
+      if (this.playing) this.pausePlayback();
+      else this.resumePlayback();
+    },
+    resumePlayback() {
+      if (!this.audio) return;
+      const buffer = this.ensureAudioBuffer();
+      if (this.playOffset >= this.duration) this.playOffset = 0;
+      const source = this.audioCtx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(this.audioCtx.destination);
+      source.onended = () => {
+        if (this.playSource !== source) return; // superseded by pause/stop
+        this.playing = false;
+        this.playOffset = 0;
+        this.playbackTime = 0;
+        this.playSource = null;
+        this.playheadPage = null;
+      };
+      source.start(0, this.playOffset);
+      this.playStartedAt = this.audioCtx.currentTime - this.playOffset;
+      this.playSource = source;
+      this.playing = true;
+      this.tickPlayhead();
+    },
+    pausePlayback() {
+      if (!this.playSource) return;
+      this.playOffset = this.audioCtx.currentTime - this.playStartedAt;
+      const source = this.playSource;
+      this.playSource = null; // so onended becomes a no-op
+      source.onended = null;
+      source.stop();
+      this.playing = false;
+      cancelAnimationFrame(this.playRaf);
+    },
+    stopPlayback() {
+      if (this.playSource) {
+        const source = this.playSource;
+        this.playSource = null;
+        source.onended = null;
+        try {
+          source.stop();
+        } catch {
+          // already stopped
+        }
+      }
+      cancelAnimationFrame(this.playRaf);
+      this.playing = false;
+      this.playOffset = 0;
+      this.playbackTime = 0;
+      this.playheadPage = null;
+    },
+    tickPlayhead() {
+      if (!this.playing) return;
+      this.playbackTime = this.audioCtx.currentTime - this.playStartedAt;
+      this.updatePlayhead(this.playbackTime);
+      this.playRaf = requestAnimationFrame(() => this.tickPlayhead());
+    },
+    async updatePlayhead(sec) {
+      if (this.playheadBusy) return;
+      this.playheadBusy = true;
+      try {
+        const info = await elementsAtTime(sec * 1000);
+        const ids = [...(info?.notes || []), ...(info?.chords || []), ...(info?.rests || [])];
+        let el = null;
+        for (const id of ids) {
+          el = document.getElementById(id);
+          if (el) break;
+        }
+        const pageEl = el?.closest(".page");
+        const pageIndex = pageEl ? [...this.$refs.pageEls].indexOf(pageEl) : -1;
+        if (pageIndex === -1) {
+          this.playheadPage = null;
+          return;
+        }
+        const noteRect = el.getBoundingClientRect();
+        const pageRect = pageEl.getBoundingClientRect();
+        this.playheadLeft = noteRect.left - pageRect.left + pageEl.scrollLeft;
+        this.playheadPage = pageIndex;
+      } catch {
+        // transient: score may be mid-rebuild, just skip this frame
+      } finally {
+        this.playheadBusy = false;
+      }
+    },
   },
 };
 </script>
@@ -613,6 +731,12 @@ export default {
           <span class="chip">🎵 {{ qnotes.length }} {{ msg.notes }}</span>
           <span class="chip" v-if="keyName">🔑 {{ keyName }}</span>
         </div>
+        <div class="playback">
+          <button class="btn secondary" @click="togglePlay">
+            {{ playing ? "⏸ " + msg.pauseRecording : "▶ " + msg.playRecording }}
+          </button>
+          <span class="playback-time">{{ formatTime(playbackTime) }} / {{ formatTime(duration) }}</span>
+        </div>
         <div class="downloads">
           <button class="btn" @click="dlPdf">⬇ PDF</button>
           <button class="btn" @click="dlMidi">⬇ MIDI</button>
@@ -659,7 +783,10 @@ export default {
       </div>
 
       <div class="pages">
-        <div class="page" v-for="(svg, i) in svgPages" :key="i" v-html="svg"></div>
+        <div class="page" ref="pageEls" v-for="(svg, i) in svgPages" :key="i">
+          <div class="page-content" v-html="svg"></div>
+          <div class="playhead" v-if="playheadPage === i" :style="{ left: playheadLeft + 'px' }"></div>
+        </div>
       </div>
     </div>
   </main>

@@ -49,11 +49,15 @@ function render(tk, musicxml, title, composer) {
 }
 
 self.onmessage = async (e) => {
-  const { id, type, musicxml, title, composer } = e.data;
-  if (type !== "render") return;
+  const { id, type, musicxml, title, composer, ms } = e.data;
   try {
     const tk = await getToolkit();
-    self.postMessage({ id, type: "done", svgPages: render(tk, musicxml, title, composer) });
+    if (type === "render") {
+      self.postMessage({ id, type: "done", svgPages: render(tk, musicxml, title, composer) });
+    } else if (type === "elementsAtTime") {
+      // Reads from whatever score was last loaded by "render" above.
+      self.postMessage({ id, type: "done", elements: tk.getElementsAtTime(ms) });
+    }
   } catch (err) {
     self.postMessage({ id, type: "error", message: err?.message || String(err) });
   }
