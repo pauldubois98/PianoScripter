@@ -22,3 +22,6 @@ web/dist/
 # ByteDance ONNX exports are too large for git: hosted on Hugging Face Hub
 # (regenerate locally with: uv run python tools/export_onnx.py)
 web/public/models/bytedance-*.onnx
+# Onsets and Frames (live engine): converted from Magenta's TFLite release,
+# hosted on Hugging Face Hub (regenerate with tools/oaf/)
+web/public/models/oaf-*.onnx

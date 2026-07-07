@@ -6,7 +6,8 @@ export const MESSAGES = {
     effortLabel: "Effort",
     effortAria: "Transcription effort",
     efforts: {
-      ultra: { name: "Ultra", hint: "Near-instant — the engine behind live sessions; roughest score." },
+      ultra: { name: "Ultra", hint: "Near-instant and built in — the lightest live engine; roughest score." },
+      oaf: { name: "Live", hint: "Piano-tuned live engine — cleaner than Ultra, still realtime. First use downloads a ~50 MB model." },
       fast: { name: "Fast", hint: "Quick draft quality. First use downloads a ~90 MB model, then it works offline." },
       balanced: { name: "Balanced", hint: "The standard accuracy/speed trade-off. Shares its ~90 MB model with Fast." },
       best: { name: "Best", hint: "Averages more passes for the cleanest score. First use downloads a ~175 MB model." },
@@ -71,7 +72,8 @@ export const MESSAGES = {
     effortLabel: "Effort",
     effortAria: "Effort de transcription",
     efforts: {
-      ultra: { name: "Ultra", hint: "Quasi instantané — le moteur des sessions live ; partition la plus approximative." },
+      ultra: { name: "Ultra", hint: "Quasi instantané et intégré — le moteur live le plus léger ; partition la plus approximative." },
+      oaf: { name: "Live", hint: "Moteur live spécialisé piano — plus propre qu'Ultra, toujours en temps réel. Le premier usage télécharge un modèle de ~50 Mo." },
       fast: { name: "Rapide", hint: "Qualité brouillon rapide. Le premier usage télécharge un modèle de ~90 Mo, ensuite tout fonctionne hors ligne." },
       balanced: { name: "Équilibré", hint: "Le compromis précision/vitesse standard. Partage son modèle de ~90 Mo avec Rapide." },
       best: { name: "Optimal", hint: "Moyenne plus de passes pour la partition la plus propre. Le premier usage télécharge un modèle de ~175 Mo." },

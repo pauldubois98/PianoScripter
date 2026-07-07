@@ -11,7 +11,10 @@ import { quantize, quantizeAdaptive, DEFAULT_AGGRESSIVENESS, MIN_QL, MAX_QL } fr
 import { buildMusicXml, midiName, durationLabel, ALLOWED_DURATIONS } from "./engine/musicxml.js";
 import { buildMidi } from "./engine/midi.js";
 
-const EFFORT_ICONS = { ultra: "🚀", fast: "⚡", balanced: "⚖️", best: "✨" };
+const EFFORT_ICONS = { ultra: "🚀", oaf: "🎶", fast: "⚡", balanced: "⚖️", best: "✨" };
+// efforts whose engine keeps up with the mic; live sessions use the selected
+// one of these, falling back to the built-in ultra for the heavier tiers
+const LIVE_EFFORTS = ["ultra", "oaf"];
 
 export default {
   data() {
@@ -459,7 +462,13 @@ export default {
         return;
       }
       this.mic = mic;
-      this.live = new LiveSession(mic);
+      this.live = new LiveSession(mic, {
+        engine: LIVE_EFFORTS.includes(this.effort) ? this.effort : "ultra",
+        // only the one-time model download is worth surfacing mid-session
+        onProgress: (stage, value) => {
+          this.progress = stage === "download" && value < 1 ? { stage, value } : null;
+        },
+      });
       this.liveEvents = [];
       this.startTimer();
       this.liveStart = performance.now();
@@ -693,6 +702,10 @@ export default {
         </div>
         <div class="timer">{{ timerLabel }}</div>
         <p class="hint">{{ msg.liveHint(liveEvents.length, currentEffort.name.toLowerCase()) }}</p>
+        <div class="progress" v-if="progress">
+          <div :style="{ width: Math.round(progress.value * 100) + '%' }"></div>
+        </div>
+        <p class="model-note" v-if="progress">{{ progressLabel }}</p>
         <button class="btn danger" @click="stopLive">{{ msg.stopFinalize }}</button>
       </div>
       <div class="roll-wrap"><canvas ref="roll"></canvas></div>

@@ -22,8 +22,8 @@ if (!wav || !existsSync(wav)) {
   process.exit(1);
 }
 
-const EFFORT_INDEX = { ultra: 0, fast: 1, balanced: 2, best: 3 };
-const TIMEOUT_MS = effort === "ultra" ? 90_000 : 600_000;
+const EFFORT_INDEX = { ultra: 0, oaf: 1, fast: 2, balanced: 3, best: 4 };
+const TIMEOUT_MS = effort === "ultra" || effort === "oaf" ? 90_000 : 600_000;
 
 // serve dist/ (vite preview)
 const server = spawn("npx", ["vite", "preview", "--port", "4179", "--strictPort"], {

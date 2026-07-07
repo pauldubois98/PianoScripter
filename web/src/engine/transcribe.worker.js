@@ -5,6 +5,7 @@
 //   error:    { id, type: "error", message }
 
 import { transcribeUltra } from "./basicpitch.js";
+import { transcribeOaf } from "./oaf.js";
 import { transcribeByteDance, EFFORT_HOP } from "./bytedance.js";
 
 self.onmessage = async (e) => {
@@ -15,6 +16,10 @@ self.onmessage = async (e) => {
     let pedals = [];
     if (effort === "ultra") {
       notes = await transcribeUltra(audio, { melodiaTrick });
+    } else if (effort === "oaf") {
+      notes = await transcribeOaf(audio, (stage, value) =>
+        self.postMessage({ id, type: "progress", stage, value })
+      );
     } else if (effort in EFFORT_HOP) {
       const result = await transcribeByteDance(audio, effort, (stage, value) =>
         self.postMessage({ id, type: "progress", stage, value })

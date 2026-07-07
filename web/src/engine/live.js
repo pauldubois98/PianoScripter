@@ -12,8 +12,10 @@ const MIN_NEW_SECONDS = 0.3; // skip a pass when almost no new audio arrived
 const ENGRAVE_INTERVAL = 3000; // ms between engraved-draft refreshes
 
 export class LiveSession {
-  constructor(mic) {
+  constructor(mic, { engine = "ultra", onProgress } = {}) {
     this.mic = mic;
+    this.engine = engine; // "ultra" (Basic Pitch) or "oaf" (Onsets and Frames)
+    this.onProgress = onProgress;
     this.processedSamples = 0;
     // keyed by "pitch|tick" (50 ms ticks): re-detections refine sounding notes
     this.events = new Map();
@@ -33,8 +35,9 @@ export class LiveSession {
       if (audio.length - this.processedSamples < MIN_NEW_SECONDS * SAMPLE_RATE) return;
       const start = Math.max(0, this.processedSamples - CONTEXT_SECONDS * SAMPLE_RATE);
       // melodiaTrick off: it invents onset-less notes, re-triggering held notes
-      const { notes } = await transcribeAudio(audio.subarray(start), "ultra", {
+      const { notes } = await transcribeAudio(audio.subarray(start), this.engine, {
         melodiaTrick: false,
+        onProgress: this.onProgress,
       });
       const offset = start / SAMPLE_RATE;
       for (const n of notes) {
