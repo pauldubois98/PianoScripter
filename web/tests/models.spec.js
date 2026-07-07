@@ -119,9 +119,27 @@ describe("models.js download integrity", () => {
     ort.InferenceSession.create.mockRejectedValueOnce(new Error("Error in input stream"));
     ort.InferenceSession.create.mockResolvedValueOnce({ ok: true });
 
+    const remoteUrl = "https://huggingface.co/pauldubois98/piano-quantized/resolve/main/bytedance-fp16.onnx";
     const session = await getSession("bytedance-fp16.onnx");
     expect(session).toEqual({ ok: true });
+    // both candidate cache entries get purged, not just the one that was hit
     expect(cache.delete).toHaveBeenCalledWith(localUrl);
+    expect(cache.delete).toHaveBeenCalledWith(remoteUrl);
     expect(fetchMock).toHaveBeenCalledTimes(1); // fell through to the network once
+  });
+
+  it("never lets the browser HTTP cache serve or store these downloads", async () => {
+    const { caches } = makeFakeCaches();
+    globalThis.caches = caches;
+    const bytes = new Uint8Array(64).fill(9);
+    const fetchMock = vi.fn(async () => fullResponse(bytes));
+    globalThis.fetch = fetchMock;
+
+    const { getSession } = await import("../src/engine/models.js");
+    const ort = await import("onnxruntime-web");
+    ort.InferenceSession.create.mockResolvedValue({ ok: true });
+
+    await getSession("bytedance-fp16.onnx");
+    expect(fetchMock).toHaveBeenCalledWith(expect.any(String), { cache: "no-store" });
   });
 });

@@ -12,7 +12,11 @@ ort.env.wasm.numThreads = self.crossOriginIsolated
 
 export { ort };
 
-const CACHE_NAME = "piano-scripter-models-v2";
+// Bumped whenever a caching bug is fixed, so every user gets a guaranteed
+// clean slate on next load instead of relying solely on the runtime
+// self-heal in getSession() below (which can only catch corruption that
+// actually fails to parse).
+const CACHE_NAME = "piano-scripter-models-v3";
 
 // The ByteDance exports are too large for the repo; they are downloaded on
 // demand. Order: same-origin models/ dir (local dev / self-hosting), then the
@@ -29,7 +33,12 @@ const REMOTE_BASE = "https://huggingface.co/pauldubois98/piano-quantized/resolve
 const sessions = new Map();
 
 async function fetchWithProgress(url, onProgress) {
-  const resp = await fetch(url);
+  // We already do our own long-lived, integrity-checked caching via the
+  // Cache API below; letting the browser's HTTP cache (or a service worker
+  // sitting in front of it, e.g. coi-serviceworker on GitHub Pages) also
+  // cache/replay these large responses only adds a second place a bad
+  // response can get stuck and served back on retry.
+  const resp = await fetch(url, { cache: "no-store" });
   if (!resp.ok) throw new Error(`HTTP ${resp.status} for ${url}`);
   // static hosts answer missing paths with the SPA's index.html and a 200:
   // never hand HTML to the ONNX parser
@@ -82,10 +91,14 @@ async function fetchFresh(cache, urls, onProgress) {
   throw lastError;
 }
 
-async function loadModelBytes(file, onProgress, { skipCache = false } = {}) {
+function candidateUrls(file) {
   const localUrl = new URL(`models/${file}`, self.location.origin + basePath()).href;
   const remoteUrl = REMOTE_BASE + file;
-  const urls = [localUrl, remoteUrl];
+  return [localUrl, remoteUrl];
+}
+
+async function loadModelBytes(file, onProgress, { skipCache = false } = {}) {
+  const urls = candidateUrls(file);
   let cache = null;
   try {
     cache = await caches.open(CACHE_NAME);
@@ -109,18 +122,26 @@ function basePath() {
 /** Get (or create) an inference session for a model file. */
 export async function getSession(file, onProgress) {
   if (sessions.has(file)) return sessions.get(file);
-  const { bytes, url, cache } = await loadModelBytes(file, onProgress);
+  const { bytes, cache } = await loadModelBytes(file, onProgress);
   try {
     const session = await ort.InferenceSession.create(bytes, { executionProviders: ["wasm"] });
     sessions.set(file, session);
     return session;
-  } catch {
+  } catch (err) {
     // The bytes we just tried may be a truncated/corrupted entry cached by
     // an older build (before the download-integrity check above existed).
-    // Drop it and retry once straight from the network so users self-heal
-    // instead of failing forever on every reload.
-    await cache?.delete(url).catch(() => {});
-    const retry = await loadModelBytes(file, onProgress, { skipCache: true });
+    // Drop every candidate cache entry for this file and retry once
+    // straight from the network so users self-heal instead of failing
+    // forever on every reload.
+    for (const url of candidateUrls(file)) {
+      await cache?.delete(url).catch(() => {});
+    }
+    let retry;
+    try {
+      retry = await loadModelBytes(file, onProgress, { skipCache: true });
+    } catch {
+      throw err; // the retry's own fetch failure is less informative than the parse error
+    }
     const session = await ort.InferenceSession.create(retry.bytes, { executionProviders: ["wasm"] });
     sessions.set(file, session);
     return session;
