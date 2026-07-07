@@ -16,7 +16,18 @@ export { ort };
 // clean slate on next load instead of relying solely on the runtime
 // self-heal in getSession() below (which can only catch corruption that
 // actually fails to parse).
-const CACHE_NAME = "piano-scripter-models-v3";
+const CACHE_NAME = "piano-scripter-models-v4";
+
+// Drop retired cache versions so orphaned multi-hundred-MB entries (some
+// with bodies that are no longer readable at all) don't sit in the user's
+// quota forever.
+for (const old of ["piano-scripter-models-v2", "piano-scripter-models-v3"]) {
+  try {
+    caches?.delete(old).catch(() => {});
+  } catch {
+    // Cache API unavailable
+  }
+}
 
 // The ByteDance exports are too large for the repo; they are downloaded on
 // demand. Order: same-origin models/ dir (local dev / self-hosting), then the
@@ -68,7 +79,18 @@ async function fetchWithProgress(url, onProgress) {
 async function readFromCache(cache, urls) {
   for (const url of urls) {
     const hit = await cache?.match(url).catch(() => null);
-    if (hit) return { url, bytes: new Uint8Array(await hit.arrayBuffer()) };
+    if (!hit) continue;
+    try {
+      return { url, bytes: new Uint8Array(await hit.arrayBuffer()) };
+    } catch {
+      // The stored body itself can be unreadable (Firefox surfaces a raw
+      // "Error in input stream" when the on-disk entry is truncated or
+      // corrupted). cache.match() succeeds in that case, so without this
+      // catch the error escapes unwrapped and, because the entry is never
+      // evicted, transcription fails forever on every reload. Treat it as
+      // a miss: drop the entry and fall through to the network.
+      await cache.delete(url).catch(() => {});
+    }
   }
   return null;
 }

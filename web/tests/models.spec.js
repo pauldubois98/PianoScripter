@@ -128,6 +128,34 @@ describe("models.js download integrity", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1); // fell through to the network once
   });
 
+  it("treats a cached entry whose body cannot be read as a miss and refetches", async () => {
+    // Firefox throws a raw "Error in input stream" from arrayBuffer() when
+    // the on-disk cache body is truncated/corrupted, even though match()
+    // succeeded. That must not escape to the user (it did, in production,
+    // failing every transcription until site data was cleared by hand).
+    const { caches, cache } = makeFakeCaches();
+    globalThis.caches = caches;
+    const localUrl = "http://localhost/PianoScripter/models/bytedance-fp16.onnx";
+    await cache.put(localUrl, {
+      arrayBuffer: async () => {
+        throw new Error("Error in input stream");
+      },
+    });
+
+    const goodBytes = new Uint8Array(64).fill(9);
+    const fetchMock = vi.fn(async () => fullResponse(goodBytes));
+    globalThis.fetch = fetchMock;
+
+    const { getSession } = await import("../src/engine/models.js");
+    const ort = await import("onnxruntime-web");
+    ort.InferenceSession.create.mockResolvedValue({ ok: true });
+
+    const session = await getSession("bytedance-fp16.onnx");
+    expect(session).toEqual({ ok: true });
+    expect(cache.delete).toHaveBeenCalledWith(localUrl); // bad entry evicted
+    expect(fetchMock).toHaveBeenCalledTimes(1); // fell through to the network
+  });
+
   it("wraps a persistent parse failure with the file/url/size so it's self-diagnosing", async () => {
     const { caches } = makeFakeCaches();
     globalThis.caches = caches;
