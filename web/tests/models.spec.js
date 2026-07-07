@@ -128,6 +128,21 @@ describe("models.js download integrity", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1); // fell through to the network once
   });
 
+  it("wraps a persistent parse failure with the file/url/size so it's self-diagnosing", async () => {
+    const { caches } = makeFakeCaches();
+    globalThis.caches = caches;
+    const bytes = new Uint8Array(64).fill(9);
+    globalThis.fetch = vi.fn(async () => fullResponse(bytes));
+
+    const { getSession } = await import("../src/engine/models.js");
+    const ort = await import("onnxruntime-web");
+    ort.InferenceSession.create.mockRejectedValue(new Error("Error in input stream"));
+
+    await expect(getSession("bytedance-fp16.onnx")).rejects.toThrow(
+      /ONNX parse failed for bytedance-fp16\.onnx \(64 bytes from .*\): Error in input stream/
+    );
+  });
+
   it("never lets the browser HTTP cache serve or store these downloads", async () => {
     const { caches } = makeFakeCaches();
     globalThis.caches = caches;

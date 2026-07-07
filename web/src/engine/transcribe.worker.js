@@ -26,6 +26,11 @@ self.onmessage = async (e) => {
     }
     self.postMessage({ id, type: "done", notes, pedals });
   } catch (err) {
-    self.postMessage({ id, type: "error", message: err?.message || String(err) });
+    // Bundle enough environment context into the message that a report of
+    // this error is self-diagnosing (browser, threading, isolation state)
+    // without needing a round-trip to ask the reporter for their setup.
+    const env = `effort=${effort} threads=${self.crossOriginIsolated ? "multi" : "single"} `
+      + `isolated=${self.crossOriginIsolated} ua=${navigator.userAgent}`;
+    self.postMessage({ id, type: "error", message: `${err?.message || String(err)} [${env}]` });
   }
 };

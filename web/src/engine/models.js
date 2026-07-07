@@ -119,12 +119,22 @@ function basePath() {
   return path.slice(0, path.lastIndexOf("/assets/") + 1) || "/";
 }
 
+async function createSession(file, url, bytes) {
+  try {
+    return await ort.InferenceSession.create(bytes, { executionProviders: ["wasm"] });
+  } catch (err) {
+    // Surface enough context (which file/url/size) that this doesn't read
+    // as an opaque parser error with no way to tell what actually failed.
+    throw new Error(`ONNX parse failed for ${file} (${bytes.length} bytes from ${url}): ${err.message}`);
+  }
+}
+
 /** Get (or create) an inference session for a model file. */
 export async function getSession(file, onProgress) {
   if (sessions.has(file)) return sessions.get(file);
-  const { bytes, cache } = await loadModelBytes(file, onProgress);
+  const { bytes, url, cache } = await loadModelBytes(file, onProgress);
   try {
-    const session = await ort.InferenceSession.create(bytes, { executionProviders: ["wasm"] });
+    const session = await createSession(file, url, bytes);
     sessions.set(file, session);
     return session;
   } catch (err) {
@@ -133,8 +143,8 @@ export async function getSession(file, onProgress) {
     // Drop every candidate cache entry for this file and retry once
     // straight from the network so users self-heal instead of failing
     // forever on every reload.
-    for (const url of candidateUrls(file)) {
-      await cache?.delete(url).catch(() => {});
+    for (const candidate of candidateUrls(file)) {
+      await cache?.delete(candidate).catch(() => {});
     }
     let retry;
     try {
@@ -142,7 +152,7 @@ export async function getSession(file, onProgress) {
     } catch {
       throw err; // the retry's own fetch failure is less informative than the parse error
     }
-    const session = await ort.InferenceSession.create(retry.bytes, { executionProviders: ["wasm"] });
+    const session = await createSession(file, retry.url, retry.bytes);
     sessions.set(file, session);
     return session;
   }
