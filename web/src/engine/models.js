@@ -73,19 +73,33 @@ async function readFromCache(cache, urls) {
   return null;
 }
 
+const TRANSIENT_RETRIES = 2; // extra attempts per URL, beyond the first
+const RETRY_DELAY_MS = 700;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function fetchFresh(cache, urls, onProgress) {
   let lastError;
   for (const url of urls) {
-    try {
-      const bytes = await fetchWithProgress(url, onProgress);
+    for (let attempt = 0; attempt <= TRANSIENT_RETRIES; attempt++) {
       try {
-        await cache?.put(url, new Response(bytes.slice().buffer));
-      } catch {
-        // quota exceeded: keep going without caching
+        const bytes = await fetchWithProgress(url, onProgress);
+        try {
+          await cache?.put(url, new Response(bytes.slice().buffer));
+        } catch {
+          // quota exceeded: keep going without caching
+        }
+        return { url, bytes };
+      } catch (err) {
+        lastError = err;
+        // A dropped connection or a CDN hiccup mid-stream is transient --
+        // silently retry a couple of times before moving on to the next
+        // candidate URL (or giving up), instead of surfacing a one-off
+        // network blip as a hard failure to the user.
+        if (attempt < TRANSIENT_RETRIES) await sleep(RETRY_DELAY_MS);
       }
-      return { url, bytes };
-    } catch (err) {
-      lastError = err;
     }
   }
   throw lastError;
