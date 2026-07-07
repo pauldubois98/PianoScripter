@@ -135,6 +135,8 @@ input[type=file] { display: none; }
   justify-content: center;
 }
 .effort-label { font-weight: 600; font-size: .9rem; }
+.aggressiveness-slider { accent-color: var(--accent); width: 160px; }
+.aggressiveness-value { color: var(--muted); font-size: .85rem; font-weight: 600; min-width: 5.5em; }
 .segmented {
   display: inline-flex; border: 1px solid var(--border); border-radius: 10px;
   overflow: hidden; background: color-mix(in srgb, var(--border) 30%, transparent);

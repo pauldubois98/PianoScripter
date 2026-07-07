@@ -3,6 +3,8 @@
 // Note events are {onset, offset, pitch, velocity} (seconds / MIDI numbers);
 // quantized notes are {id, hand, onsetQl, durQl, pitch, velocity}.
 
+import { MEASURE_QL } from "./score.js";
+
 export const HAND_SPLIT_PITCH = 60; // middle C: below -> left hand (bass clef)
 export const GRID = 0.25; // sixteenth notes, in quarterLength units
 export const MIN_QL = 0.25;
@@ -122,17 +124,69 @@ export function calibrateGrid(notes, bpm) {
 }
 
 const TIER1_GRID = 1; // quarter note / beat
-const TIER1_TOL = 0.2;
 const TIER2_GRID = 0.5; // eighth note
-const TIER2_TOL = 0.12;
+
+// How hard the "realistic" mode pushes notes onto beat/eighth-note
+// positions, on a 0..1 scale. 0 stays close to the sixteenth-note grid
+// (closest to the raw acoustic timing); 1 snaps aggressively to
+// beats/eighths even when that costs more timing accuracy. The tolerances
+// below are chosen so DEFAULT_AGGRESSIVENESS reproduces the previous fixed
+// behavior (TIER1_TOL 0.2, TIER2_TOL 0.12).
+export const DEFAULT_AGGRESSIVENESS = 0.5;
+const TIER1_TOL_RANGE = [0.1, 0.3]; // at aggressiveness 0 / 1
+const TIER2_TOL_RANGE = [0.04, 0.2];
+const MERGE_THRESHOLD_MAX = 0.5; // QL: largest barline sliver eligible for merging, at aggressiveness 1
+
+function lerp([lo, hi], t) {
+  return lo + (hi - lo) * t;
+}
+
+/** aggressiveness (0..1) -> the tier tolerances and merge threshold it implies. */
+export function aggressivenessParams(aggressiveness) {
+  const clamped = Math.max(0, Math.min(1, aggressiveness));
+  return {
+    tier1Tol: lerp(TIER1_TOL_RANGE, clamped),
+    tier2Tol: lerp(TIER2_TOL_RANGE, clamped),
+    mergeThreshold: clamped * MERGE_THRESHOLD_MAX,
+  };
+}
 
 /** Snaps to the coarsest grid (beat, then eighth, then sixteenth) that plausibly fits. */
-function snapAdaptive(value) {
+export function snapAdaptive(value, tier1Tol, tier2Tol) {
   let snapped = roundHalfEven(value / TIER1_GRID) * TIER1_GRID;
-  if (Math.abs(value - snapped) <= TIER1_TOL) return snapped;
+  if (Math.abs(value - snapped) <= tier1Tol) return snapped;
   snapped = roundHalfEven(value / TIER2_GRID) * TIER2_GRID;
-  if (Math.abs(value - snapped) <= TIER2_TOL) return snapped;
+  if (Math.abs(value - snapped) <= tier2Tol) return snapped;
   return snap(value, GRID);
+}
+
+/**
+ * A note tied across a barline sometimes leaves a musically-insignificant
+ * sliver on one side (an artifact of quantization, not something a person
+ * would actually write down). When that sliver is at or below `threshold`
+ * (in quarter-lengths), trim it away so the note sits cleanly on one side
+ * of the barline instead of being split by a tie. Mutates qnotes in place.
+ */
+export function mergeBarlineSlivers(qnotes, threshold) {
+  if (threshold <= 0) return qnotes;
+  for (const q of qnotes) {
+    const onset = q.onsetQl;
+    const end = onset + q.durQl;
+    const firstBar = Math.ceil((onset + 1e-9) / MEASURE_QL) * MEASURE_QL;
+    if (firstBar >= end - 1e-9) continue; // doesn't cross a barline
+    const lastBar = Math.floor((end - 1e-9) / MEASURE_QL) * MEASURE_QL;
+    const preSliver = firstBar - onset;
+    const postSliver = end - lastBar;
+    let newOnset = onset;
+    let newEnd = end;
+    if (preSliver > 1e-9 && preSliver <= threshold) newOnset = firstBar;
+    if (lastBar >= firstBar - 1e-9 && postSliver > 1e-9 && postSliver <= threshold) newEnd = lastBar;
+    if (newEnd - newOnset >= MIN_QL) {
+      q.onsetQl = newOnset;
+      q.durQl = newEnd - newOnset;
+    }
+  }
+  return qnotes;
 }
 
 const LEGATO_GAP_TOL = 0.06; // seconds: small enough to assume the note was held through
@@ -170,21 +224,23 @@ function legatoDurations(notes) {
   });
 }
 
-export function quantizeAdaptive(notes, bpm) {
+export function quantizeAdaptive(notes, bpm, aggressiveness = DEFAULT_AGGRESSIVENESS) {
   if (!notes.length) return [];
+  const { tier1Tol, tier2Tol, mergeThreshold } = aggressivenessParams(aggressiveness);
   const scale = calibrateGrid(notes, bpm);
   const secToQl = (bpm * scale) / 60;
   const durSec = legatoDurations(notes);
   const qnotes = notes.map((n, i) => {
-    const snappedDur = snapAdaptive(durSec[i] * secToQl) || MIN_QL;
+    const snappedDur = snapAdaptive(durSec[i] * secToQl, tier1Tol, tier2Tol) || MIN_QL;
     return {
       id: 0,
       hand: n.pitch >= HAND_SPLIT_PITCH ? "R" : "L",
-      onsetQl: snapAdaptive(n.onset * secToQl),
+      onsetQl: snapAdaptive(n.onset * secToQl, tier1Tol, tier2Tol),
       durQl: Math.max(MIN_QL, Math.min(snappedDur, MAX_QL)),
       pitch: n.pitch,
       velocity: n.velocity,
     };
   });
-  return finalizeQuantized(qnotes);
+  const finalized = finalizeQuantized(qnotes);
+  return mergeBarlineSlivers(finalized, mergeThreshold);
 }

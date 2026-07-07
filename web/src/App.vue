@@ -7,7 +7,7 @@ import { estimateTempo } from "./audio/tempo.js";
 import { MicCapture } from "./audio/mic.js";
 import { transcribeAudio, renderScore, elementsAtTime } from "./engine/engine.js";
 import { LiveSession } from "./engine/live.js";
-import { quantize, quantizeAdaptive, MIN_QL, MAX_QL } from "./engine/quantize.js";
+import { quantize, quantizeAdaptive, DEFAULT_AGGRESSIVENESS, MIN_QL, MAX_QL } from "./engine/quantize.js";
 import { buildMusicXml, midiName, durationLabel, ALLOWED_DURATIONS } from "./engine/musicxml.js";
 import { buildMidi } from "./engine/midi.js";
 
@@ -43,6 +43,10 @@ export default {
       progress: null, // { stage: "download"|"infer", value: 0..1 }
       editing: false,
       rhythmMode: localStorage.getItem("rhythmMode") || "adaptive", // "adaptive" | "raw"
+      aggressiveness: localStorage.getItem("aggressiveness") != null
+        ? Number(localStorage.getItem("aggressiveness"))
+        : DEFAULT_AGGRESSIVENESS,
+      aggressivenessDebounce: null,
       // recording / live
       mic: null,
       seconds: 0,
@@ -106,6 +110,11 @@ export default {
     pitchOptions() {
       // A0..C8, the full piano range
       return Array.from({ length: 88 }, (_, i) => i + 21);
+    },
+    aggressivenessLabel() {
+      const levels = this.msg.aggressivenessLevels;
+      const i = Math.min(levels.length - 1, Math.floor(this.aggressiveness * levels.length));
+      return levels[i];
     },
   },
   mounted() {
@@ -190,8 +199,10 @@ export default {
     async rebuild() {
       const res = this.resultCache[this.resultEffort];
       const bpm = this.bpmTouched ? this.bpm : this.tempoBpm;
-      const quantizer = this.rhythmMode === "adaptive" ? quantizeAdaptive : quantize;
-      this.qnotes = quantizer(res.notes, bpm);
+      this.qnotes =
+        this.rhythmMode === "adaptive"
+          ? quantizeAdaptive(res.notes, bpm, this.aggressiveness)
+          : quantize(res.notes, bpm);
       this.editing = false; // a new note set invalidates manual edits
       this.syncPlayAudio(res.notes);
       await this.rebuildRender();
@@ -214,6 +225,11 @@ export default {
       this.rhythmMode = this.rhythmMode === "adaptive" ? "raw" : "adaptive";
       localStorage.setItem("rhythmMode", this.rhythmMode);
       this.updateJob();
+    },
+    onAggressivenessChange() {
+      localStorage.setItem("aggressiveness", this.aggressiveness);
+      clearTimeout(this.aggressivenessDebounce);
+      this.aggressivenessDebounce = setTimeout(() => this.updateJob(), 150);
     },
     // Re-engraves the score from the current qnotes as-is (does not
     // re-quantize), so manual edits and title/author-only changes survive.
@@ -741,6 +757,16 @@ export default {
             </div>
           </div>
           <span class="hint">{{ rhythmMode === "adaptive" ? msg.rhythmAdaptiveHint : msg.rhythmRawHint }}</span>
+        </div>
+        <div class="effort" style="margin-bottom:0" v-if="rhythmMode === 'adaptive'">
+          <div class="effort-row">
+            <span class="effort-label">{{ msg.aggressivenessLabel }}</span>
+            <input class="aggressiveness-slider" type="range" min="0" max="1" step="0.05"
+                   v-model.number="aggressiveness" :disabled="updating"
+                   :aria-label="msg.aggressivenessLabel" @input="onAggressivenessChange" />
+            <span class="aggressiveness-value">{{ aggressivenessLabel }}</span>
+          </div>
+          <span class="hint">{{ msg.aggressivenessHint }}</span>
         </div>
         <span class="meta-busy" v-if="updating">{{ updatingLabel }}</span>
         <div class="progress" v-if="updating && progress">
