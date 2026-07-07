@@ -10,6 +10,7 @@ import { LiveSession } from "./engine/live.js";
 import { quantize, quantizeAdaptive, DEFAULT_AGGRESSIVENESS, MIN_QL, MAX_QL } from "./engine/quantize.js";
 import { buildMusicXml, midiName, durationLabel, ALLOWED_DURATIONS } from "./engine/musicxml.js";
 import { buildMidi } from "./engine/midi.js";
+import { encodeWav16 } from "./audio/wav.js";
 
 const EFFORT_ICONS = { ultra: "🚀", oaf: "🎶", fast: "⚡", balanced: "⚖️", best: "✨" };
 // efforts whose engine keeps up with the mic; live sessions use the selected
@@ -25,6 +26,7 @@ export default {
       lang: localStorage.getItem("lang")
         || (navigator.language && navigator.language.toLowerCase().startsWith("fr") ? "fr" : "en"),
       effort: "balanced",
+      showAbout: false,
       dragging: false,
       error: null,
       // current transcription (replaces the server-side Job)
@@ -425,6 +427,9 @@ export default {
       const { svgsToPdf } = await import("./pdf.js");
       this.saveBlob(await svgsToPdf(this.svgPages), "transcription.pdf");
     },
+    dlWav() {
+      this.saveBlob(new Blob([encodeWav16(this.audio, SAMPLE_RATE)], { type: "audio/wav" }), "recording.wav");
+    },
 
     // ---- plain recording ----
     startTimer() {
@@ -629,13 +634,18 @@ export default {
 </script>
 
 <template>
-  <button class="theme-toggle" :aria-label="theme === 'dark' ? msg.themeLight : msg.themeDark"
-          :title="theme === 'dark' ? msg.themeLight : msg.themeDark" @click="toggleTheme">
-    {{ theme === "dark" ? "☀️" : "🌙" }}
-  </button>
-  <button class="lang-toggle" :aria-label="msg.langTitle" :title="msg.langTitle" @click="toggleLang">
-    {{ lang === "fr" ? "EN" : "FR" }}
-  </button>
+  <div class="top-toolbar">
+    <button class="toolbar-btn" :aria-label="msg.aboutTitle" :title="msg.aboutTitle" @click="showAbout = !showAbout">
+      {{ showAbout ? "✕" : "ℹ️" }}
+    </button>
+    <button class="toolbar-btn lang-toggle" :aria-label="msg.langTitle" :title="msg.langTitle" @click="toggleLang">
+      {{ lang === "fr" ? "EN" : "FR" }}
+    </button>
+    <button class="toolbar-btn" :aria-label="theme === 'dark' ? msg.themeLight : msg.themeDark"
+            :title="theme === 'dark' ? msg.themeLight : msg.themeDark" @click="toggleTheme">
+      {{ theme === "dark" ? "☀️" : "🌙" }}
+    </button>
+  </div>
   <header>
     <h1>🎹 PianoScripter</h1>
     <p>{{ msg.subtitle }}</p>
@@ -643,6 +653,32 @@ export default {
   </header>
 
   <main>
+    <!-- about -->
+    <div class="card about" v-if="showAbout">
+      <h2>{{ msg.about.title }}</h2>
+      <p>{{ msg.about.intro }}</p>
+
+      <div class="flow">
+        <span class="flow-step" v-for="(step, i) in msg.about.pipeline" :key="i">
+          <span class="flow-box">{{ step }}</span>
+          <span class="flow-arrow" v-if="i < msg.about.pipeline.length - 1">→</span>
+        </span>
+      </div>
+
+      <h3>{{ msg.about.modelsTitle }}</h3>
+      <div class="model-card" v-for="m in msg.about.models" :key="m.name">
+        <div class="model-card-head">
+          <span class="model-icon">{{ m.icon }}</span>
+          <strong>{{ m.name }}</strong>
+          <span class="chip">{{ m.tag }}</span>
+        </div>
+        <p>{{ m.text }}</p>
+      </div>
+
+      <p class="hint" style="margin-top:1rem">{{ msg.about.privacy }}</p>
+    </div>
+
+    <template v-else>
     <!-- idle -->
     <div class="card" v-if="state === 'idle'">
       <div class="effort">
@@ -800,6 +836,7 @@ export default {
           <button class="btn" @click="dlPdf">⬇ PDF</button>
           <button class="btn" @click="dlMidi">⬇ MIDI</button>
           <button class="btn" @click="dlMusicXml">⬇ MusicXML</button>
+          <button class="btn" @click="dlWav">⬇ {{ msg.dlRecording }}</button>
           <button class="btn secondary" :disabled="updating" @click="editing = !editing">
             {{ editing ? msg.doneEditing : msg.editScore }}
           </button>
@@ -848,6 +885,7 @@ export default {
         </div>
       </div>
     </div>
+    </template>
   </main>
 
   <footer>{{ msg.footer }}</footer>
