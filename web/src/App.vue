@@ -58,6 +58,8 @@ export default {
       playStartedAt: 0, // audioCtx.currentTime when the current segment started
       audioCtx: null,
       audioBuffer: null,
+      playAudio: null, // this.audio further trimmed to the first detected note, matching the score's time origin
+      playDuration: 0,
       playSource: null,
       playRaf: null,
       playheadBusy: false,
@@ -124,6 +126,8 @@ export default {
     reset() {
       this.stopPlayback();
       this.audioBuffer = null;
+      this.playAudio = null;
+      this.playDuration = 0;
       this.state = "idle";
       this.error = null;
       this.audio = null;
@@ -149,6 +153,8 @@ export default {
     async processAudio(audio16k) {
       this.stopPlayback();
       this.audioBuffer = null;
+      this.playAudio = null;
+      this.playDuration = 0;
       this.state = "processing";
       this.error = null;
       this.progress = null;
@@ -187,7 +193,21 @@ export default {
       const quantizer = this.rhythmMode === "adaptive" ? quantizeAdaptive : quantize;
       this.qnotes = quantizer(res.notes, bpm);
       this.editing = false; // a new note set invalidates manual edits
+      this.syncPlayAudio(res.notes);
       await this.rebuildRender();
+    },
+    // The score always starts its first note on beat 1 (finalizeQuantized
+    // drops leading silence), but this.audio still has whatever lead-in
+    // trimSilence left in front of that first note. Without this, playback
+    // starts "too early" relative to the score and the cursor runs ahead
+    // of the audio for the whole piece. Re-trim a playback-only copy so
+    // both share the same time origin.
+    syncPlayAudio(rawNotes) {
+      const lead = rawNotes.length ? Math.max(0, Math.min(...rawNotes.map((n) => n.onset))) : 0;
+      const leadSamples = Math.min(this.audio.length, Math.round(lead * SAMPLE_RATE));
+      this.playAudio = this.audio.slice(leadSamples);
+      this.playDuration = this.playAudio.length / SAMPLE_RATE;
+      this.audioBuffer = null;
     },
     toggleRhythmMode() {
       if (this.updating) return;
@@ -486,10 +506,10 @@ export default {
       return `${m}:${String(s % 60).padStart(2, "0")}`;
     },
     ensureAudioBuffer() {
-      if (!this.audioBuffer && this.audio) {
+      if (!this.audioBuffer && this.playAudio) {
         if (!this.audioCtx) this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        const buffer = this.audioCtx.createBuffer(1, this.audio.length, SAMPLE_RATE);
-        buffer.copyToChannel(this.audio, 0);
+        const buffer = this.audioCtx.createBuffer(1, this.playAudio.length, SAMPLE_RATE);
+        buffer.copyToChannel(this.playAudio, 0);
         this.audioBuffer = buffer;
       }
       return this.audioBuffer;
@@ -499,9 +519,9 @@ export default {
       else this.resumePlayback();
     },
     resumePlayback() {
-      if (!this.audio) return;
+      if (!this.playAudio) return;
       const buffer = this.ensureAudioBuffer();
-      if (this.playOffset >= this.duration) this.playOffset = 0;
+      if (this.playOffset >= this.playDuration) this.playOffset = 0;
       const source = this.audioCtx.createBufferSource();
       source.buffer = buffer;
       source.connect(this.audioCtx.destination);
@@ -735,7 +755,7 @@ export default {
           <button class="btn secondary" @click="togglePlay">
             {{ playing ? "⏸ " + msg.pauseRecording : "▶ " + msg.playRecording }}
           </button>
-          <span class="playback-time">{{ formatTime(playbackTime) }} / {{ formatTime(duration) }}</span>
+          <span class="playback-time">{{ formatTime(playbackTime) }} / {{ formatTime(playDuration) }}</span>
         </div>
         <div class="downloads">
           <button class="btn" @click="dlPdf">⬇ PDF</button>
