@@ -33,7 +33,7 @@ flowchart LR
     E --> F[MusicXML]
     F -->|Verovio WASM| G[SVG score]
     G -->|jsPDF + svg2pdf| H[📄 PDF]
-    E -->|@tonejs/midi| I[🎹 MIDI]
+    E -->|"@tonejs/midi"| I[🎹 MIDI]
 ```
 
 ### Effort levels
