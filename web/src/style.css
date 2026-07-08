@@ -112,6 +112,10 @@ main { flex: 1; width: 100%; max-width: 880px; margin: 0 auto; padding: 1.5rem 1
 .spinner.small { width: 15px; height: 15px; border-width: 2px; flex: 0 0 auto; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .hint.updating-hint { display: flex; align-items: center; gap: .45rem; color: var(--text); font-weight: 600; }
+.hint.download-confirm {
+  display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
+  justify-content: center; color: var(--text);
+}
 .chips { display: flex; gap: .6rem; flex-wrap: wrap; justify-content: center; }
 .chip {
   padding: .35rem .8rem; border-radius: 999px; font-size: .85rem;
@@ -140,6 +144,16 @@ main { flex: 1; width: 100%; max-width: 880px; margin: 0 auto; padding: 1.5rem 1
 .hint { color: var(--muted); font-size: .88rem; }
 footer { text-align: center; padding: 1.2rem; color: var(--muted); font-size: .82rem; }
 input[type=file] { display: none; }
+.settings-group {
+  border: 1px solid var(--border); border-radius: 14px;
+  padding: 1.1rem 1.2rem .3rem; margin-bottom: 1.4rem;
+  background: color-mix(in srgb, var(--border) 12%, transparent);
+}
+.settings-group-title {
+  font-weight: 700; font-size: .78rem; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--muted); text-align: center; margin-bottom: .9rem;
+}
+.settings-group .effort { margin-bottom: 1.1rem; }
 .effort {
   display: flex; flex-direction: column; align-items: center; gap: .6rem;
   margin-bottom: 1.4rem;

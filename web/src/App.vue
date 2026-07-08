@@ -19,6 +19,7 @@ import {
 import { buildMusicXml, midiName, durationLabel, ALLOWED_DURATIONS } from "./engine/musicxml.js";
 import { buildMidi } from "./engine/midi.js";
 import { encodeWav16 } from "./audio/wav.js";
+import { MODEL_DOWNLOAD_INFO, isModelCached } from "./engine/model-availability.js";
 
 const EFFORT_ICONS = { ultra: "🚀", oaf: "🎶", fast: "⚡", balanced: "⚖️", best: "✨" };
 // engines light enough to keep up with the mic; switchable live during a
@@ -59,7 +60,9 @@ export default {
       updating: false,
       updatingLabel: "",
       progress: null, // { stage: "download"|"infer", value: 0..1 }
+      pendingDownload: null, // { id, mb } while confirming a first-time model download
       editing: false,
+      hasEditedNotes: false, // guards "New transcription" from silently discarding manual edits
       rhythmMode: localStorage.getItem("rhythmMode") || "adaptive", // "adaptive" | "raw"
       aggressiveness: localStorage.getItem("aggressiveness") != null
         ? Number(localStorage.getItem("aggressiveness"))
@@ -173,9 +176,15 @@ export default {
       this.bpm = 120;
       this.bpmTouched = false;
       this.progress = null;
+      this.pendingDownload = null;
       this.editing = false;
+      this.hasEditedNotes = false;
       this.liveEngine = "ultra";
       this.showReprocessPrompt = false;
+    },
+    resetWithConfirm() {
+      if (this.hasEditedNotes && !window.confirm(this.msg.confirmDiscardEdits)) return;
+      this.reset();
     },
     effortSwapHint(id) {
       if (id === this.resultEffort) return this.msg.swapCurrent;
@@ -274,11 +283,30 @@ export default {
     syncFromResult() {
       if (!this.bpmTouched) this.bpm = Math.round(this.tempoBpm);
     },
-    changeEffort(id) {
+    async changeEffort(id) {
       if (this.updating || id === this.resultEffort) return;
+      // Cached results never re-download, regardless of effort; otherwise
+      // ask before a first-time fetch of a heavier model (see MODEL_DOWNLOAD_INFO).
+      if (!this.cachedEfforts.includes(id)) {
+        const info = MODEL_DOWNLOAD_INFO[id];
+        if (info && !(await isModelCached(info.file))) {
+          this.pendingDownload = { id, mb: info.mb };
+          return;
+        }
+      }
       this.effort = id; // also becomes the default for the next transcription
       this.showReprocessPrompt = false;
       this.updateJob(id);
+    },
+    confirmDownload() {
+      const { id } = this.pendingDownload;
+      this.pendingDownload = null;
+      this.effort = id;
+      this.showReprocessPrompt = false;
+      this.updateJob(id);
+    },
+    cancelDownload() {
+      this.pendingDownload = null;
     },
     onBpmChange() {
       this.bpm = Math.min(300, Math.max(20, Math.round(this.bpm) || 120));
@@ -351,6 +379,7 @@ export default {
     async editNotes(mutate) {
       if (this.updating) return;
       mutate();
+      this.hasEditedNotes = true;
       this.normalizeQnotes();
       this.updating = true;
       this.updatingLabel = this.msg.updating;
@@ -874,47 +903,58 @@ export default {
             BPM
           </label>
         </div>
-        <div class="effort" style="margin-bottom:0">
-          <div class="effort-row">
-            <span class="effort-label">{{ msg.effortLabel }}</span>
-            <div class="segmented" role="radiogroup" :aria-label="msg.effortAria">
-              <button v-for="opt in efforts" :key="opt.id"
-                      :class="{ active: resultEffort === opt.id }" :disabled="updating"
-                      :title="effortSwapHint(opt.id)" @click="changeEffort(opt.id)">
-                {{ opt.icon }} {{ opt.name }}
-              </button>
+        <div class="settings-group">
+          <div class="settings-group-title">{{ msg.qualityGroupTitle }}</div>
+          <div class="effort" style="margin-bottom:0">
+            <div class="effort-row">
+              <span class="effort-label">{{ msg.effortLabel }}</span>
+              <div class="segmented" role="radiogroup" :aria-label="msg.effortAria">
+                <button v-for="opt in efforts" :key="opt.id"
+                        :class="{ active: resultEffort === opt.id }" :disabled="updating"
+                        :title="effortSwapHint(opt.id)" @click="changeEffort(opt.id)">
+                  {{ opt.icon }} {{ opt.name }}
+                </button>
+              </div>
             </div>
-          </div>
-          <span class="hint updating-hint" v-if="updating">
-            <span class="spinner small"></span>{{ updatingLabel }}
-          </span>
-          <span class="hint" v-else>{{ efforts.find((e) => e.id === resultEffort).hint }}</span>
-        </div>
-        <div class="effort" style="margin-bottom:0">
-          <div class="effort-row">
-            <span class="effort-label">{{ msg.rhythmModeLabel }}</span>
-            <div class="segmented" role="radiogroup" :aria-label="msg.rhythmModeLabel">
-              <button :class="{ active: rhythmMode === 'adaptive' }" :disabled="updating"
-                      :title="msg.rhythmAdaptiveHint" @click="rhythmMode !== 'adaptive' && toggleRhythmMode()">
-                {{ msg.rhythmAdaptive }}
-              </button>
-              <button :class="{ active: rhythmMode === 'raw' }" :disabled="updating"
-                      :title="msg.rhythmRawHint" @click="rhythmMode !== 'raw' && toggleRhythmMode()">
-                {{ msg.rhythmRaw }}
-              </button>
+            <span class="hint updating-hint" v-if="updating">
+              <span class="spinner small"></span>{{ updatingLabel }}
+            </span>
+            <div class="hint download-confirm" v-else-if="pendingDownload">
+              <span>{{ msg.confirmDownloadBody(pendingDownload.mb) }}</span>
+              <button class="btn small" @click="confirmDownload">{{ msg.confirmDownloadAccept }}</button>
+              <button class="btn secondary small" @click="cancelDownload">{{ msg.confirmDownloadCancel }}</button>
             </div>
+            <span class="hint" v-else>{{ efforts.find((e) => e.id === resultEffort).hint }}</span>
           </div>
-          <span class="hint">{{ rhythmMode === "adaptive" ? msg.rhythmAdaptiveHint : msg.rhythmRawHint }}</span>
         </div>
-        <div class="effort" style="margin-bottom:0" v-if="rhythmMode === 'adaptive'">
-          <div class="effort-row">
-            <span class="effort-label">{{ msg.aggressivenessLabel }}</span>
-            <input class="aggressiveness-slider" type="range" min="0" max="1" step="0.05"
-                   v-model.number="aggressiveness" :disabled="updating"
-                   :aria-label="msg.aggressivenessLabel" @input="onAggressivenessChange" />
-            <span class="aggressiveness-value">{{ aggressivenessLabel }}</span>
+        <div class="settings-group">
+          <div class="settings-group-title">{{ msg.rhythmGroupTitle }}</div>
+          <div class="effort" style="margin-bottom:0">
+            <div class="effort-row">
+              <span class="effort-label">{{ msg.rhythmModeLabel }}</span>
+              <div class="segmented" role="radiogroup" :aria-label="msg.rhythmModeLabel">
+                <button :class="{ active: rhythmMode === 'adaptive' }" :disabled="updating"
+                        :title="msg.rhythmAdaptiveHint" @click="rhythmMode !== 'adaptive' && toggleRhythmMode()">
+                  {{ msg.rhythmAdaptive }}
+                </button>
+                <button :class="{ active: rhythmMode === 'raw' }" :disabled="updating"
+                        :title="msg.rhythmRawHint" @click="rhythmMode !== 'raw' && toggleRhythmMode()">
+                  {{ msg.rhythmRaw }}
+                </button>
+              </div>
+            </div>
+            <span class="hint">{{ rhythmMode === "adaptive" ? msg.rhythmAdaptiveHint : msg.rhythmRawHint }}</span>
           </div>
-          <span class="hint">{{ msg.aggressivenessHint }}</span>
+          <div class="effort" style="margin-bottom:0" v-if="rhythmMode === 'adaptive'">
+            <div class="effort-row">
+              <span class="effort-label">{{ msg.aggressivenessLabel }}</span>
+              <input class="aggressiveness-slider" type="range" min="0" max="1" step="0.05"
+                     v-model.number="aggressiveness" :disabled="updating"
+                     :aria-label="msg.aggressivenessLabel" @input="onAggressivenessChange" />
+              <span class="aggressiveness-value">{{ aggressivenessLabel }}</span>
+            </div>
+            <span class="hint">{{ msg.aggressivenessHint }}</span>
+          </div>
         </div>
         <div class="progress" v-if="updating && progress">
           <div :style="{ width: Math.round(progress.value * 100) + '%' }"></div>
@@ -934,7 +974,7 @@ export default {
           <button class="btn secondary" :disabled="updating" @click="editing = !editing">
             {{ editing ? msg.doneEditing : msg.editScore }}
           </button>
-          <button class="btn secondary" @click="reset">{{ msg.newTranscription }}</button>
+          <button class="btn secondary" @click="resetWithConfirm">{{ msg.newTranscription }}</button>
           <button class="btn secondary" @click="togglePlay">
             {{ playing ? "⏸ " + msg.pauseRecording : "▶ " + msg.playRecording }}
           </button>

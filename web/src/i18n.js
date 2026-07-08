@@ -3,6 +3,12 @@ export const MESSAGES = {
   en: {
     subtitle: "Play the piano. Get the sheet music.",
     badge: "🔒 100% in your browser — audio never leaves this device",
+    qualityGroupTitle: "Quality",
+    rhythmGroupTitle: "Rhythm settings",
+    confirmDownloadBody: (mb) => `This downloads a ~${mb} MB model the first time. Continue?`,
+    confirmDownloadAccept: "⬇ Download and continue",
+    confirmDownloadCancel: "Cancel",
+    confirmDiscardEdits: "You've manually edited this score. Starting a new transcription will discard those edits. Continue?",
     effortLabel: "Effort",
     effortAria: "Transcription effort",
     efforts: {
@@ -135,6 +141,12 @@ export const MESSAGES = {
   fr: {
     subtitle: "Jouez du piano. Obtenez la partition.",
     badge: "🔒 100 % dans votre navigateur — l'audio ne quitte jamais cet appareil",
+    qualityGroupTitle: "Qualité",
+    rhythmGroupTitle: "Réglages du rythme",
+    confirmDownloadBody: (mb) => `Ceci télécharge un modèle d'environ ${mb} Mo la première fois. Continuer ?`,
+    confirmDownloadAccept: "⬇ Télécharger et continuer",
+    confirmDownloadCancel: "Annuler",
+    confirmDiscardEdits: "Vous avez modifié cette partition manuellement. Démarrer une nouvelle transcription supprimera ces modifications. Continuer ?",
     effortLabel: "Effort",
     effortAria: "Effort de transcription",
     efforts: {
