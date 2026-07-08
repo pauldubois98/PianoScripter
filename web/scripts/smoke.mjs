@@ -70,7 +70,7 @@ try {
     await page.evaluate((idx) => {
       document.querySelectorAll(".card.center .effort")[0].querySelectorAll(".segmented button")[idx].click();
     }, EFFORT_INDEX[effort]);
-    await page.waitForFunction(() => !document.querySelector(".meta-busy"), { timeout: TIMEOUT_MS });
+    await page.waitForFunction(() => !document.querySelector(".updating-hint"), { timeout: TIMEOUT_MS });
   }
 
   const stats = await page.evaluate(() => ({

@@ -885,7 +885,10 @@ export default {
               </button>
             </div>
           </div>
-          <span class="hint">{{ efforts.find((e) => e.id === resultEffort).hint }}</span>
+          <span class="hint updating-hint" v-if="updating">
+            <span class="spinner small"></span>{{ updatingLabel }}
+          </span>
+          <span class="hint" v-else>{{ efforts.find((e) => e.id === resultEffort).hint }}</span>
         </div>
         <div class="effort" style="margin-bottom:0">
           <div class="effort-row">
@@ -913,7 +916,6 @@ export default {
           </div>
           <span class="hint">{{ msg.aggressivenessHint }}</span>
         </div>
-        <span class="meta-busy" v-if="updating">{{ updatingLabel }}</span>
         <div class="progress" v-if="updating && progress">
           <div :style="{ width: Math.round(progress.value * 100) + '%' }"></div>
         </div>
