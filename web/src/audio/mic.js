@@ -41,6 +41,17 @@ export class MicCapture {
     // no connection to destination: we only capture, never play back
   }
 
+  /** Suspends the audio graph: the worklet stops emitting frames, so no
+   * silence gets recorded for the paused span and the buffer stays
+   * contiguous once resumed. */
+  async pause() {
+    await this.context?.suspend();
+  }
+
+  async resume() {
+    await this.context?.resume();
+  }
+
   /** All audio captured so far, as one 16 kHz Float32Array. */
   snapshot() {
     const out = new Float32Array(this.length);

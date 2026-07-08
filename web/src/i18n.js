@@ -28,6 +28,10 @@ export const MESSAGES = {
     liveHint: (n, effort) =>
       `Notes land on the roll moments after you play them (${n} so far). Stopping runs a final ${effort}-quality pass.`,
     stopFinalize: "■ Stop & finalize",
+    pauseLive: "⏸ Pause",
+    resumeLive: "▶ Resume",
+    livePausedLabel: "Paused",
+    livePausedHint: "Recording is paused — the microphone isn't listening. Resume to keep playing, or finalize now.",
     liveWaiting: "🎧 The engraved draft appears after a few seconds of playing.",
     transcribing: "Transcribing…",
     processingHint: "Detecting notes → quantizing rhythm → engraving the score.",
@@ -154,6 +158,10 @@ export const MESSAGES = {
     liveHint: (n, effort) =>
       `Les notes apparaissent sur le rouleau juste après avoir été jouées (${n} pour l'instant). L'arrêt lance une passe finale en qualité ${effort}.`,
     stopFinalize: "■ Arrêter et finaliser",
+    pauseLive: "⏸ Pause",
+    resumeLive: "▶ Reprendre",
+    livePausedLabel: "En pause",
+    livePausedHint: "L'enregistrement est en pause — le microphone n'écoute plus. Reprenez pour continuer à jouer, ou finalisez maintenant.",
     liveWaiting: "🎧 La partition gravée apparaît après quelques secondes de jeu.",
     transcribing: "Transcription…",
     processingHint: "Détection des notes → quantification du rythme → gravure de la partition.",

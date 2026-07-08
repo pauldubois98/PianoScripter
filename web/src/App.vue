@@ -60,6 +60,8 @@ export default {
       liveTimerId: null,
       liveEvents: [],
       liveStart: 0,
+      livePaused: false,
+      livePausedAt: 0,
       rollRaf: null,
       // playback of the recorded audio, with a cursor synced to the score
       playing: false,
@@ -479,24 +481,46 @@ export default {
       this.liveStart = performance.now();
       this.liveTimerId = setInterval(async () => {
         const session = this.live;
-        if (this.state !== "live" || !session) return;
+        if (this.state !== "live" || this.livePaused || !session) return;
         await session.tick();
         if (this.live === session) this.liveEvents = session.sortedEvents();
       }, 1000);
       this.state = "live";
+      this.livePaused = false;
+      this.$nextTick(() => this.drawRoll());
+    },
+    async pauseLive() {
+      if (this.livePaused) return;
+      this.livePaused = true;
+      this.livePausedAt = performance.now();
+      clearInterval(this.timerId);
+      cancelAnimationFrame(this.rollRaf);
+      await this.mic.pause(); // worklet stops emitting frames: no gap in the buffer
+    },
+    async resumeLive() {
+      if (!this.livePaused) return;
+      await this.mic.resume();
+      // shift both clocks forward by the pause duration so the timer and the
+      // roll's playhead keep matching the (unpaused) audio timeline
+      const pausedMs = performance.now() - this.livePausedAt;
+      this.liveStart += pausedMs;
+      this.livePaused = false;
+      this.timerId = setInterval(() => this.seconds++, 1000);
       this.$nextTick(() => this.drawRoll());
     },
     async stopLive() {
       clearInterval(this.timerId);
       clearInterval(this.liveTimerId);
       cancelAnimationFrame(this.rollRaf);
+      if (this.livePaused) await this.mic.resume();
+      this.livePaused = false;
       const audio = await this.mic.stop();
       this.mic = null;
       this.live = null;
       await this.processAudio(audio); // final full-quality pass
     },
     drawRoll() {
-      if (this.state !== "live") return;
+      if (this.state !== "live" || this.livePaused) return;
       const canvas = this.$refs.roll;
       if (canvas) {
         drawPianoRoll(canvas, this.liveEvents, (performance.now() - this.liveStart) / 1000);
@@ -743,15 +767,23 @@ export default {
     <div v-else-if="state === 'live'">
       <div class="card center">
         <div style="display:flex; align-items:center; gap:.7rem">
-          <span class="rec-dot"></span><strong>{{ msg.live }}</strong>
+          <span class="rec-dot" :class="{ paused: livePaused }"></span>
+          <strong>{{ livePaused ? msg.livePausedLabel : msg.live }}</strong>
         </div>
         <div class="timer">{{ timerLabel }}</div>
-        <p class="hint">{{ msg.liveHint(liveEvents.length, currentEffort.name.toLowerCase()) }}</p>
+        <p class="hint">
+          {{ livePaused ? msg.livePausedHint : msg.liveHint(liveEvents.length, currentEffort.name.toLowerCase()) }}
+        </p>
         <div class="progress" v-if="progress">
           <div :style="{ width: Math.round(progress.value * 100) + '%' }"></div>
         </div>
         <p class="model-note" v-if="progress">{{ progressLabel }}</p>
-        <button class="btn danger" @click="stopLive">{{ msg.stopFinalize }}</button>
+        <div style="display:flex; gap:.7rem; flex-wrap:wrap; justify-content:center">
+          <button class="btn secondary" @click="livePaused ? resumeLive() : pauseLive()">
+            {{ livePaused ? msg.resumeLive : msg.pauseLive }}
+          </button>
+          <button class="btn danger" @click="stopLive">{{ msg.stopFinalize }}</button>
+        </div>
       </div>
       <div class="roll-wrap"><canvas ref="roll"></canvas></div>
       <div class="pages" v-if="live && live.svgPages.length">
