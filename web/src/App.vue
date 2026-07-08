@@ -924,21 +924,21 @@ export default {
           <span class="chip">🎵 {{ qnotes.length }} {{ msg.notes }}</span>
           <span class="chip" v-if="keyName">🔑 {{ keyName }}</span>
         </div>
-        <div class="playback">
-          <button class="btn secondary" @click="togglePlay">
-            {{ playing ? "⏸ " + msg.pauseRecording : "▶ " + msg.playRecording }}
-          </button>
-          <span class="playback-time">{{ formatTime(playbackTime) }} / {{ formatTime(playDuration) }}</span>
-        </div>
         <div class="downloads">
           <button class="btn" @click="dlPdf">⬇ PDF</button>
           <button class="btn" @click="dlMidi">⬇ MIDI</button>
           <button class="btn" @click="dlMusicXml">⬇ MusicXML</button>
           <button class="btn" @click="dlWav">⬇ {{ msg.dlRecording }}</button>
+        </div>
+        <div class="result-actions">
           <button class="btn secondary" :disabled="updating" @click="editing = !editing">
             {{ editing ? msg.doneEditing : msg.editScore }}
           </button>
           <button class="btn secondary" @click="reset">{{ msg.newTranscription }}</button>
+          <button class="btn secondary" @click="togglePlay">
+            {{ playing ? "⏸ " + msg.pauseRecording : "▶ " + msg.playRecording }}
+          </button>
+          <span class="playback-time">{{ formatTime(playbackTime) }} / {{ formatTime(playDuration) }}</span>
         </div>
       </div>
 
