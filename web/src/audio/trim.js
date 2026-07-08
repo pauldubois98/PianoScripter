@@ -21,12 +21,16 @@ function frameRms(audio) {
   return rms;
 }
 
-export function trimSilence(audio) {
-  if (!audio.length) return audio;
+// [start, end) sample range to keep, matching librosa.effects.trim's edge
+// cases: empty input keeps nothing, all-silent input keeps everything (no
+// frame ever crosses the threshold, so there's nothing to trim relative to),
+// and audio with only sub-threshold content keeps nothing.
+function silenceBounds(audio) {
+  if (!audio.length) return [0, 0];
   const rms = frameRms(audio);
   let max = 0;
   for (const v of rms) if (v > max) max = v;
-  if (max === 0) return audio;
+  if (max === 0) return [0, audio.length];
   const threshold = max * Math.pow(10, -TOP_DB / 20);
   let first = -1;
   let last = -1;
@@ -36,8 +40,20 @@ export function trimSilence(audio) {
       last = f;
     }
   }
-  if (first < 0) return audio.slice(0, 0);
+  if (first < 0) return [0, 0];
   const start = first * HOP_LENGTH;
   const end = Math.min(audio.length, (last + 1) * HOP_LENGTH);
+  return [start, end];
+}
+
+export function trimSilence(audio) {
+  const [start, end] = silenceBounds(audio);
   return audio.slice(start, end);
+}
+
+/** Sample offset trimSilence would cut from the front -- for callers that
+ * need to re-anchor timestamps already computed against the untrimmed
+ * buffer (e.g. a live session's incrementally-detected note onsets). */
+export function trimSilenceOffset(audio) {
+  return silenceBounds(audio)[0];
 }

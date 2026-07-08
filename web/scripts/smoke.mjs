@@ -52,17 +52,26 @@ try {
   });
 
   await page.goto("http://localhost:4179/", { waitUntil: "networkidle2" });
-  await page.waitForSelector(".segmented button");
 
-  // pick the effort, then upload the wav
-  await page.evaluate((idx) => {
-    document.querySelectorAll(".segmented button")[idx].click();
-  }, EFFORT_INDEX[effort]);
+  // the idle page no longer offers an effort choice: every upload starts at
+  // Ultra, then swaps via the done view's effort control if a different
+  // effort was requested
   const input = await page.waitForSelector("input[type=file]");
   await input.uploadFile(wav);
 
-  console.log(`uploaded ${wav} at effort=${effort}, waiting for the score…`);
-  await page.waitForSelector(".pages .page svg", { timeout: TIMEOUT_MS });
+  console.log(`uploaded ${wav}, waiting for the initial (Ultra) score…`);
+  await page.waitForSelector(".pages .page svg", { timeout: 90_000 });
+
+  if (effort !== "ultra") {
+    console.log(`swapping to effort=${effort}…`);
+    // the effort swap control is the first ".effort" block in the done view
+    // (a second one right after it holds the unrelated rhythm-mode toggle)
+    await page.waitForSelector(".card.center .effort .segmented button");
+    await page.evaluate((idx) => {
+      document.querySelectorAll(".card.center .effort")[0].querySelectorAll(".segmented button")[idx].click();
+    }, EFFORT_INDEX[effort]);
+    await page.waitForFunction(() => !document.querySelector(".meta-busy"), { timeout: TIMEOUT_MS });
+  }
 
   const stats = await page.evaluate(() => ({
     pages: document.querySelectorAll(".pages .page svg").length,

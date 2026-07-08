@@ -2,7 +2,7 @@
 import { MESSAGES } from "./i18n.js";
 import { drawPianoRoll } from "./roll.js";
 import { decodeToMono16k, SAMPLE_RATE } from "./audio/decode.js";
-import { trimSilence } from "./audio/trim.js";
+import { trimSilence, trimSilenceOffset } from "./audio/trim.js";
 import { estimateTempo } from "./audio/tempo.js";
 import { MicCapture } from "./audio/mic.js";
 import { transcribeAudio, renderScore, elementsAtTime } from "./engine/engine.js";
@@ -13,19 +13,21 @@ import { buildMidi } from "./engine/midi.js";
 import { encodeWav16 } from "./audio/wav.js";
 
 const EFFORT_ICONS = { ultra: "🚀", oaf: "🎶", fast: "⚡", balanced: "⚖️", best: "✨" };
-// efforts whose engine keeps up with the mic; live sessions use the selected
-// one of these, falling back to the built-in ultra for the heavier tiers
+// engines light enough to keep up with the mic; switchable live during a
+// recording (see liveEngine / setLiveEngine)
 const LIVE_EFFORTS = ["ultra", "oaf"];
+// recommended reprocess target once a live recording stops
+const RECOMMENDED_REPROCESS_EFFORT = "balanced";
 
 export default {
   data() {
     return {
-      state: "idle", // idle | recording | live | processing | done
+      state: "idle", // idle | live | processing | done
       theme: localStorage.getItem("theme")
         || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
       lang: localStorage.getItem("lang")
         || (navigator.language && navigator.language.toLowerCase().startsWith("fr") ? "fr" : "en"),
-      effort: "balanced",
+      effort: "ultra", // no selector on the first page anymore; uploads default to this too
       showAbout: false,
       dragging: false,
       error: null,
@@ -62,6 +64,8 @@ export default {
       liveStart: 0,
       livePaused: false,
       livePausedAt: 0,
+      liveEngine: "ultra", // switchable mid-recording between the two live-capable engines
+      showReprocessPrompt: false,
       rollRaf: null,
       // playback of the recorded audio, with a cursor synced to the score
       playing: false,
@@ -90,8 +94,8 @@ export default {
         ...this.msg.efforts[id],
       }));
     },
-    currentEffort() {
-      return this.efforts.find((e) => e.id === this.effort);
+    liveEngineOptions() {
+      return this.efforts.filter((e) => LIVE_EFFORTS.includes(e.id));
     },
     cachedEfforts() {
       return Object.keys(this.resultCache);
@@ -159,6 +163,8 @@ export default {
       this.bpmTouched = false;
       this.progress = null;
       this.editing = false;
+      this.liveEngine = "ultra";
+      this.showReprocessPrompt = false;
     },
     effortSwapHint(id) {
       if (id === this.resultEffort) return this.msg.swapCurrent;
@@ -260,6 +266,7 @@ export default {
     changeEffort(id) {
       if (this.updating || id === this.resultEffort) return;
       this.effort = id; // also becomes the default for the next transcription
+      this.showReprocessPrompt = false;
       this.updateJob(id);
     },
     onBpmChange() {
@@ -433,32 +440,11 @@ export default {
       this.saveBlob(new Blob([encodeWav16(this.audio, SAMPLE_RATE)], { type: "audio/wav" }), "recording.wav");
     },
 
-    // ---- plain recording ----
+    // ---- recording (always live-monitored) ----
     startTimer() {
       this.seconds = 0;
       this.timerId = setInterval(() => this.seconds++, 1000);
     },
-    async startRecording() {
-      this.error = null;
-      const mic = new MicCapture();
-      try {
-        await mic.start();
-      } catch {
-        this.error = this.msg.micDenied;
-        return;
-      }
-      this.mic = mic;
-      this.startTimer();
-      this.state = "recording";
-    },
-    async stopRecording() {
-      clearInterval(this.timerId);
-      const audio = await this.mic.stop();
-      this.mic = null;
-      await this.processAudio(audio);
-    },
-
-    // ---- live session ----
     async startLive() {
       this.error = null;
       const mic = new MicCapture();
@@ -469,8 +455,9 @@ export default {
         return;
       }
       this.mic = mic;
+      this.liveEngine = "ultra"; // always starts on the built-in, no-download engine
       this.live = new LiveSession(mic, {
-        engine: LIVE_EFFORTS.includes(this.effort) ? this.effort : "ultra",
+        engine: this.liveEngine,
         // only the one-time model download is worth surfacing mid-session
         onProgress: (stage, value) => {
           this.progress = stage === "download" && value < 1 ? { stage, value } : null;
@@ -508,6 +495,13 @@ export default {
       this.timerId = setInterval(() => this.seconds++, 1000);
       this.$nextTick(() => this.drawRoll());
     },
+    // Switches the engine driving the running session's incremental
+    // transcription. LiveSession reads `this.engine` fresh on every tick, so
+    // this takes effect on the next pass without restarting the recording.
+    setLiveEngine(id) {
+      this.liveEngine = id;
+      if (this.live) this.live.engine = id;
+    },
     async stopLive() {
       clearInterval(this.timerId);
       clearInterval(this.liveTimerId);
@@ -515,9 +509,55 @@ export default {
       if (this.livePaused) await this.mic.resume();
       this.livePaused = false;
       const audio = await this.mic.stop();
+      const session = this.live;
       this.mic = null;
       this.live = null;
-      await this.processAudio(audio); // final full-quality pass
+      await this.finishLiveRecording(session, audio);
+    },
+    // Builds the initial result straight from the notes the live session
+    // already detected -- no need to re-run inference on the same audio at
+    // the same engine. A banner then offers to reprocess with a heavier
+    // model for a cleaner score (see showReprocessPrompt in the template).
+    async finishLiveRecording(session, audio16k) {
+      this.stopPlayback();
+      this.audioBuffer = null;
+      this.playAudio = null;
+      this.playDuration = 0;
+      this.state = "processing";
+      this.error = null;
+      this.progress = null;
+      this.editing = false;
+      try {
+        const trimmed = trimSilence(audio16k);
+        if (!trimmed.length) throw new Error("empty audio");
+        const offsetSamples = trimSilenceOffset(audio16k);
+        this.audio = trimmed;
+        this.duration = Math.round((trimmed.length / SAMPLE_RATE) * 10) / 10;
+        this.tempoBpm = session.bpm || estimateTempo(trimmed);
+        // the session's notes are timed against the untrimmed buffer;
+        // re-anchor them to trimmed audio's origin so playback sync
+        // (syncPlayAudio) and the shown duration agree with this.audio
+        const offsetSec = offsetSamples / SAMPLE_RATE;
+        const notes = session
+          .sortedEvents()
+          .map((n) => ({ ...n, onset: n.onset - offsetSec, offset: n.offset - offsetSec }));
+        this.resultCache = { [this.liveEngine]: { notes, pedals: [] } };
+        this.resultEffort = this.liveEngine;
+        await this.rebuild();
+        this.syncFromResult();
+        this.state = "done";
+        this.showReprocessPrompt = true;
+      } catch (err) {
+        console.error(err);
+        this.error = this.msg.failed;
+        this.state = "idle";
+      } finally {
+        this.progress = null;
+      }
+    },
+    reprocessRecommended() {
+      this.showReprocessPrompt = false;
+      this.changeEffort(RECOMMENDED_REPROCESS_EFFORT);
     },
     drawRoll() {
       if (this.state !== "live" || this.livePaused) return;
@@ -714,29 +754,11 @@ export default {
     <template v-else>
     <!-- idle -->
     <div class="card" v-if="state === 'idle'">
-      <div class="effort">
-        <div class="effort-row">
-          <span class="effort-label">{{ msg.effortLabel }}</span>
-          <div class="segmented" role="radiogroup" :aria-label="msg.effortAria">
-            <button v-for="opt in efforts" :key="opt.id"
-                    :class="{ active: effort === opt.id }"
-                    :title="opt.hint" @click="effort = opt.id">
-              {{ opt.icon }} {{ opt.name }}
-            </button>
-          </div>
-        </div>
-        <span class="hint">{{ currentEffort.hint }}</span>
-      </div>
       <div class="actions">
-        <button class="action" @click="startRecording">
+        <button class="action" @click="startLive">
           <span class="icon">🎙️</span>
           <span><strong>{{ msg.record }}</strong></span>
           <small>{{ msg.recordSub }}</small>
-        </button>
-        <button class="action" @click="startLive">
-          <span class="icon">🔴</span>
-          <span><strong>{{ msg.live }}</strong></span>
-          <small>{{ msg.liveSub }}</small>
         </button>
         <label class="action" :class="{ dragover: dragging }"
                @dragover.prevent="dragging = true" @dragleave="dragging = false"
@@ -753,17 +775,7 @@ export default {
       <p class="error" style="text-align:center; margin-top:1.4rem" v-else>{{ error }}</p>
     </div>
 
-    <!-- recording -->
-    <div class="card center" v-else-if="state === 'recording'">
-      <div style="display:flex; align-items:center; gap:.7rem">
-        <span class="rec-dot"></span><strong>{{ msg.recording }}</strong>
-      </div>
-      <div class="timer">{{ timerLabel }}</div>
-      <p class="hint">{{ msg.recordingHint }}</p>
-      <button class="btn danger" @click="stopRecording">{{ msg.stopTranscribe }}</button>
-    </div>
-
-    <!-- live -->
+    <!-- live (recording, live-monitored) -->
     <div v-else-if="state === 'live'">
       <div class="card center">
         <div style="display:flex; align-items:center; gap:.7rem">
@@ -772,8 +784,20 @@ export default {
         </div>
         <div class="timer">{{ timerLabel }}</div>
         <p class="hint">
-          {{ livePaused ? msg.livePausedHint : msg.liveHint(liveEvents.length, currentEffort.name.toLowerCase()) }}
+          {{ livePaused ? msg.livePausedHint : msg.liveHint(liveEvents.length) }}
         </p>
+        <div class="effort" style="margin-bottom:0">
+          <div class="effort-row">
+            <span class="effort-label">{{ msg.liveEngineLabel }}</span>
+            <div class="segmented" role="radiogroup" :aria-label="msg.liveEngineLabel">
+              <button v-for="opt in liveEngineOptions" :key="opt.id"
+                      :class="{ active: liveEngine === opt.id }"
+                      :title="opt.hint" @click="setLiveEngine(opt.id)">
+                {{ opt.icon }} {{ opt.name }}
+              </button>
+            </div>
+          </div>
+        </div>
         <div class="progress" v-if="progress">
           <div :style="{ width: Math.round(progress.value * 100) + '%' }"></div>
         </div>
@@ -807,6 +831,13 @@ export default {
 
     <!-- result -->
     <div v-else-if="state === 'done'">
+      <div class="card center reprocess-banner" v-if="showReprocessPrompt">
+        <p>{{ msg.reprocessBody(efforts.find((e) => e.id === resultEffort).name) }}</p>
+        <div style="display:flex; gap:.7rem; flex-wrap:wrap; justify-content:center">
+          <button class="btn" @click="reprocessRecommended">{{ msg.reprocessAccept }}</button>
+          <button class="btn secondary" @click="showReprocessPrompt = false">{{ msg.reprocessDismiss }}</button>
+        </div>
+      </div>
       <div class="card center">
         <div class="meta-edit">
           <input v-model.trim="title" :placeholder="msg.titlePlaceholder" :aria-label="msg.titlePlaceholder"

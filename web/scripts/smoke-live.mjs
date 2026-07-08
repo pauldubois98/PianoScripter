@@ -1,6 +1,6 @@
-// Live-mode smoke: fake microphone (Chrome tone generator), run a few seconds,
-// stop, expect the final pass to reach the done state without page errors.
-// Run: node scripts/smoke-live.mjs
+// Record-mode smoke (always live-monitored): fake microphone (Chrome tone
+// generator), run a few seconds, stop, expect the done state without page
+// errors. Run: node scripts/smoke-live.mjs
 
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
@@ -34,8 +34,8 @@ try {
   page.on("console", (m) => m.type() === "error" && console.error("[console]", m.text()));
 
   await page.goto("http://localhost:4181/", { waitUntil: "networkidle2" });
-  // second action button = live session
-  await page.evaluate(() => document.querySelectorAll(".actions .action")[1].click());
+  // first (and now only) action button = record, always live-monitored
+  await page.evaluate(() => document.querySelectorAll(".actions .action")[0].click());
   await page.waitForSelector(".rec-dot", { timeout: 15000 });
   console.log("live session running…");
   await new Promise((r) => setTimeout(r, 9000));
