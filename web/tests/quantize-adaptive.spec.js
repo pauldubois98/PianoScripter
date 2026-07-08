@@ -72,6 +72,48 @@ describe("quantizeAdaptive", () => {
     expect(right.durQl).toBeLessThanOrEqual(MAX_QL);
   });
 
+  it("keeps chord notes together and produces the same grid at every aggressiveness level (real transcription)", () => {
+    // Exact onset/offset timings from a real ByteDance transcription
+    // (recordings/test_rythm.wav, "balanced" effort). The whole passage
+    // carries a consistent ~0.3 QL phase drift (the model's detected
+    // downbeat isn't quite on the true beat), which put several of these
+    // chords right at the tier-1 snap tolerance boundary. Before
+    // calibrateGrid fit a phase offset (not just tempo scale), raising
+    // aggressiveness flipped some chords onto the wrong grid position
+    // entirely while splitting others' two notes across two different beats.
+    const bpm = 125.0;
+    const notes = [
+      { onset: 3.065, offset: 4.23, pitch: 81, velocity: 80 },
+      { onset: 3.066, offset: 3.85, pitch: 77, velocity: 80 },
+      { onset: 4.048, offset: 5.09, pitch: 76, velocity: 80 },
+      { onset: 4.053, offset: 5.12, pitch: 79, velocity: 80 },
+      { onset: 5.024, offset: 6.17, pitch: 74, velocity: 80 },
+      { onset: 5.025, offset: 6.31, pitch: 77, velocity: 80 },
+      { onset: 5.986, offset: 7.1, pitch: 76, velocity: 80 },
+      { onset: 5.995, offset: 6.9, pitch: 72, velocity: 80 },
+      { onset: 6.956, offset: 7.45, pitch: 77, velocity: 80 },
+      { onset: 6.958, offset: 7.45, pitch: 74, velocity: 80 },
+      { onset: 7.458, offset: 7.98, pitch: 77, velocity: 80 },
+      { onset: 7.459, offset: 7.99, pitch: 74, velocity: 80 },
+      { onset: 7.958, offset: 9.06, pitch: 76, velocity: 80 },
+      { onset: 7.963, offset: 9.41, pitch: 79, velocity: 80 },
+    ];
+
+    const results = [0.5, 0.8, 1.0].map((a) => quantizeAdaptive(notes, bpm, a));
+    const gridsAndDurations = results.map((qnotes) => ({
+      onsets: [...new Set(qnotes.map((q) => q.onsetQl))].sort((a, b) => a - b),
+      chordSizes: [...new Set(qnotes.map((q) => q.onsetQl))]
+        .sort((a, b) => a - b)
+        .map((onset) => qnotes.filter((q) => q.onsetQl === onset).length),
+    }));
+    // Balanced, Strong and Maximum must all agree on the same beat grid and
+    // keep every chord's two notes on the same onset.
+    for (const g of gridsAndDurations) {
+      expect(g).toEqual(gridsAndDurations[0]);
+      expect(g.chordSizes.every((n) => n === 2)).toBe(true);
+    }
+  });
+
   it("aggressiveness raises the tier tolerances and the merge threshold", () => {
     const loose = aggressivenessParams(0);
     const mid = aggressivenessParams(0.5);

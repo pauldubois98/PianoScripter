@@ -93,6 +93,7 @@ const SCALE_MAX = 1.015;
 const SCALE_STEP = 0.001;
 const CALIBRATION_GRID = 0.5; // eighth notes: what the tempo fit aligns to
 const CALIBRATION_ERROR_CAP = 0.25; // caps the influence of stray/syncopated notes
+const PHASE_STEP = 0.01; // QL: fine enough to matter, coarse enough to stay cheap
 
 function gridError(value, grid) {
   const frac = value / grid - Math.floor(value / grid);
@@ -101,26 +102,36 @@ function gridError(value, grid) {
 }
 
 /**
- * Finds a small tempo correction (±1.5%) that best aligns note onsets to the
- * eighth-note grid, relative to the first onset. The first onset itself is
- * always forced to beat 0 by finalizeQuantized's leading-silence trim, so no
- * separate phase parameter is needed here -- only the tempo scale is free.
+ * Finds a small tempo correction (±1.5% scale) and a phase offset (a
+ * fraction of an eighth note) that jointly best align note onsets to the
+ * eighth-note grid. A phase term matters alongside scale: forcing the very
+ * first onset to be exactly on-grid (the previous approach) assumes that
+ * note's own detected timing has no error -- it's just as noisy as any
+ * other note's. If it happens to carry, say, 0.3 QL of drift, every later
+ * note inherits that same offset relative to it, even when the whole piece
+ * is otherwise a clean grid. That residual is exactly what later decides
+ * which snapAdaptive tolerance tier a note falls into, so a few
+ * milliseconds of jitter can tip one note into "on the beat" while an
+ * equally-drifted neighbor tips the other way. Fitting phase directly
+ * against the same absolute grid snapAdaptive snaps against removes that
+ * shared drift up front instead of leaving each note's fate to chance.
  */
 export function calibrateGrid(notes, bpm) {
-  if (notes.length < 2) return 1;
-  const t0 = Math.min(...notes.map((n) => n.onset));
-  let bestScale = 1;
+  if (notes.length < 2) return { scale: 1, phase: 0 };
+  let best = { scale: 1, phase: 0 };
   let bestCost = Infinity;
   for (let scale = SCALE_MIN; scale <= SCALE_MAX + 1e-9; scale += SCALE_STEP) {
     const secToQl = (bpm * scale) / 60;
-    let cost = 0;
-    for (const n of notes) cost += gridError((n.onset - t0) * secToQl, CALIBRATION_GRID);
-    if (cost < bestCost) {
-      bestCost = cost;
-      bestScale = scale;
+    for (let phase = 0; phase < CALIBRATION_GRID - 1e-9; phase += PHASE_STEP) {
+      let cost = 0;
+      for (const n of notes) cost += gridError(n.onset * secToQl - phase, CALIBRATION_GRID);
+      if (cost < bestCost) {
+        bestCost = cost;
+        best = { scale, phase };
+      }
     }
   }
-  return bestScale;
+  return best;
 }
 
 const TIER1_GRID = 1; // quarter note / beat
@@ -160,6 +171,41 @@ export function snapAdaptive(value, tier1Tol, tier2Tol) {
   return snap(value, GRID);
 }
 
+// Dotted-eighth family (0.75, 1.75, 2.75, ... QL): as legitimate a duration
+// as a plain eighth, but it sits exactly halfway between two TIER1_GRID
+// points (e.g. 0.75 is equidistant from 0 and 1), so it's invisible to
+// snapAdaptive's plain quarter/eighth grids and reads as noise near the
+// nearest quarter note once the tier-1 tolerance grows past 0.25 QL.
+const DOTTED_EIGHTH_OFFSET = 0.75;
+
+function nearestDottedEighth(value) {
+  return Math.round(value - DOTTED_EIGHTH_OFFSET) + DOTTED_EIGHTH_OFFSET;
+}
+
+/**
+ * Like snapAdaptive, but for note DURATIONS: also treats the dotted-eighth
+ * family as a tier-2-level "nice" value alongside plain eighths, so a real
+ * dotted-eighth duration doesn't get rounded away into the nearest plain
+ * quarter/half at high aggressiveness (see DOTTED_EIGHTH_OFFSET above).
+ * Onset snapping doesn't need this: an onset a sixteenth off the beat is
+ * genuinely timing noise to push onto the grid, not a value with its own
+ * notated meaning the way a note's length has.
+ */
+export function snapDurationAdaptive(value, tier1Tol, tier2Tol) {
+  const tier1 = roundHalfEven(value / TIER1_GRID) * TIER1_GRID;
+  const tier1Dist = Math.abs(value - tier1);
+  const dottedEighth = nearestDottedEighth(value);
+  const dottedDist = Math.abs(value - dottedEighth);
+  // Only accept the plain tier-1 grid when it's unambiguously the closer
+  // match -- otherwise a genuine dotted-eighth reading is being discarded.
+  if (tier1Dist <= tier1Tol && tier1Dist <= dottedDist) return tier1;
+  const tier2 = roundHalfEven(value / TIER2_GRID) * TIER2_GRID;
+  const tier2Dist = Math.abs(value - tier2);
+  if (dottedDist <= tier2Dist && dottedDist <= tier2Tol) return dottedEighth;
+  if (tier2Dist <= tier2Tol) return tier2;
+  return snap(value, GRID);
+}
+
 /**
  * A note tied across a barline sometimes leaves a musically-insignificant
  * sliver on one side (an artifact of quantization, not something a person
@@ -187,6 +233,36 @@ export function mergeBarlineSlivers(qnotes, threshold) {
     }
   }
   return qnotes;
+}
+
+const CHORD_ONSET_TOL = 0.03; // seconds: onsets this close are one attack, not two
+
+/**
+ * snapAdaptive snaps each note's onset independently. That's fine for notes
+ * played apart, but two notes of the same chord are never detected at the
+ * exact same instant -- a few milliseconds of jitter is normal. At low
+ * aggressiveness both usually land on the same coarse grid point anyway, but
+ * as the tier-1 tolerance widens toward its max, one note can end up just
+ * inside it while its chord-mate (a few ms away, and so a few thousandths of
+ * a quarter-length away) falls just outside -- snapping the "same" chord to
+ * two different beats. Clustering near-simultaneous raw onsets onto one
+ * shared value before snapping means they can never straddle that boundary
+ * differently. 30ms comfortably covers natural chord asynchrony while
+ * staying well under the gap between genuinely separate fast notes.
+ */
+function clusterOnsets(notes) {
+  const order = notes.map((_, i) => i).sort((a, b) => notes[a].onset - notes[b].onset);
+  const clustered = new Array(notes.length);
+  let i = 0;
+  while (i < order.length) {
+    let j = i + 1;
+    while (j < order.length && notes[order[j]].onset - notes[order[j - 1]].onset <= CHORD_ONSET_TOL) j++;
+    const idxs = order.slice(i, j);
+    const mean = idxs.reduce((sum, k) => sum + notes[k].onset, 0) / idxs.length;
+    for (const k of idxs) clustered[k] = mean;
+    i = j;
+  }
+  return clustered;
 }
 
 const LEGATO_GAP_TOL = 0.06; // seconds: small enough to assume the note was held through
@@ -227,15 +303,16 @@ function legatoDurations(notes) {
 export function quantizeAdaptive(notes, bpm, aggressiveness = DEFAULT_AGGRESSIVENESS) {
   if (!notes.length) return [];
   const { tier1Tol, tier2Tol, mergeThreshold } = aggressivenessParams(aggressiveness);
-  const scale = calibrateGrid(notes, bpm);
+  const { scale, phase } = calibrateGrid(notes, bpm);
   const secToQl = (bpm * scale) / 60;
   const durSec = legatoDurations(notes);
+  const onsetSec = clusterOnsets(notes);
   const qnotes = notes.map((n, i) => {
-    const snappedDur = snapAdaptive(durSec[i] * secToQl, tier1Tol, tier2Tol) || MIN_QL;
+    const snappedDur = snapDurationAdaptive(durSec[i] * secToQl, tier1Tol, tier2Tol) || MIN_QL;
     return {
       id: 0,
       hand: n.pitch >= HAND_SPLIT_PITCH ? "R" : "L",
-      onsetQl: snapAdaptive(n.onset * secToQl, tier1Tol, tier2Tol),
+      onsetQl: snapAdaptive(onsetSec[i] * secToQl - phase, tier1Tol, tier2Tol),
       durQl: Math.max(MIN_QL, Math.min(snappedDur, MAX_QL)),
       pitch: n.pitch,
       velocity: n.velocity,
