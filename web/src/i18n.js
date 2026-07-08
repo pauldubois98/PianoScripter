@@ -110,6 +110,19 @@ export const MESSAGES = {
           text: "The same ByteDance architecture at full 32-bit precision (Fast/Balanced use a lighter 16-bit version) with the smallest window steps of all. It's the slowest option, but averages the most passes for the cleanest, most reliable score — worth the wait for a final take.",
         },
       ],
+      rhythmTitle: "Rhythm: Realistic vs Raw",
+      rhythmModes: [
+        {
+          icon: "🎼",
+          name: "Realistic",
+          text: "Biases each note toward the rhythms a human would actually write down: quarters, halves, wholes, eighths, and their dotted variants, aligned to the beat or half-beat. It also merges tiny, musically-insignificant slivers left at barlines by quantization noise. The \"cleanup strength\" slider controls how hard it pushes — Subtle stays close to the raw acoustic timing, Maximum snaps more readily even when that costs a bit of timing accuracy. This is the right choice for most recordings, since real playing always has some timing noise to smooth out.",
+        },
+        {
+          icon: "🎹",
+          name: "Raw",
+          text: "Snaps every note independently to the nearest sixteenth note, with no bias toward \"nicer\" rhythms. Nothing gets merged or reinterpreted. Use this when a passage is genuinely syncopated or irregular and Realistic mode is over-correcting it into something you didn't play — Raw shows you the acoustic timing as detected, unfiltered.",
+        },
+      ],
       privacy: "All model files are cached in your browser after the first download (via the Cache API), so returning users never re-download them, even offline.",
     },
   },
@@ -221,6 +234,19 @@ export const MESSAGES = {
           name: "Optimal",
           tag: "téléchargement ~175 Mo",
           text: "La même architecture ByteDance en pleine précision 32 bits (Rapide/Équilibré utilisent une version allégée 16 bits) avec les plus petits pas de fenêtre. C'est l'option la plus lente, mais elle moyenne le plus de passes pour la partition la plus propre et la plus fiable — l'attente en vaut la peine pour une version finale.",
+        },
+      ],
+      rhythmTitle: "Rythme : Réaliste vs Brut",
+      rhythmModes: [
+        {
+          icon: "🎼",
+          name: "Réaliste",
+          text: "Rapproche chaque note des rythmes qu'un musicien écrirait réellement : noires, blanches, rondes, croches et leurs variantes pointées, alignées sur le temps ou le demi-temps. Il fusionne aussi les infimes fragments musicalement insignifiants laissés aux barres de mesure par le bruit de quantification. Le curseur « force du nettoyage » règle l'intensité de ce biais — Subtile reste proche du timing acoustique brut, Maximale force davantage l'alignement même au prix d'un peu de précision temporelle. C'est le bon choix pour la plupart des enregistrements, le jeu réel comportant toujours un peu de bruit temporel à lisser.",
+        },
+        {
+          icon: "🎹",
+          name: "Brut",
+          text: "Aligne chaque note indépendamment sur la double-croche la plus proche, sans aucun biais vers des rythmes « plus jolis ». Rien n'est fusionné ni réinterprété. À utiliser quand un passage est réellement syncopé ou irrégulier et que le mode Réaliste le sur-corrige en quelque chose que vous n'avez pas joué — Brut montre le timing acoustique détecté, sans filtre.",
         },
       ],
       privacy: "Tous les fichiers de modèle sont mis en cache dans votre navigateur après le premier téléchargement (via la Cache API) : les visiteurs suivants ne les retéléchargent jamais, même hors ligne.",

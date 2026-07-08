@@ -675,6 +675,15 @@ export default {
         <p>{{ m.text }}</p>
       </div>
 
+      <h3>{{ msg.about.rhythmTitle }}</h3>
+      <div class="model-card" v-for="m in msg.about.rhythmModes" :key="m.name">
+        <div class="model-card-head">
+          <span class="model-icon">{{ m.icon }}</span>
+          <strong>{{ m.name }}</strong>
+        </div>
+        <p>{{ m.text }}</p>
+      </div>
+
       <p class="hint" style="margin-top:1rem">{{ msg.about.privacy }}</p>
     </div>
 
