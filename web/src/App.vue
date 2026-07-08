@@ -988,31 +988,39 @@ export default {
             <div class="editor-hand-title">{{ hand === "R" ? msg.rightHand : msg.leftHand }}</div>
             <div class="editor-event" v-for="ev in (hand === 'R' ? rightEvents : leftEvents)" :key="hand + ev.onsetQl">
               <div class="editor-event-row">
-                <button class="mini" :disabled="updating || ev.onsetQl <= 0" :title="msg.moveEarlier"
-                        @click="moveEvent(hand, ev.onsetQl, -0.25)">◀</button>
-                <span class="editor-beat">{{ beatLabel(ev.onsetQl) }}</span>
-                <button class="mini" :disabled="updating" :title="msg.moveLater"
-                        @click="moveEvent(hand, ev.onsetQl, 0.25)">▶</button>
-                <select :value="ev.durQl" :disabled="updating"
-                        @change="setEventDuration(hand, ev.onsetQl, Number($event.target.value))">
-                  <option v-for="d in durOptionsFor(ev.durQl)" :key="d" :value="d">{{ durationLabel(d) }}</option>
-                </select>
-                <span class="editor-pitches">
-                  <span class="pitch-chip" v-for="p in ev.pitches" :key="p">
-                    {{ midiName(p) }}
-                    <button class="chip-x" :disabled="updating" @click="removePitch(hand, ev.onsetQl, p)">×</button>
-                  </span>
+                <span class="editor-cluster">
+                  <button class="mini" :disabled="updating || ev.onsetQl <= 0" :title="msg.moveEarlier"
+                          @click="moveEvent(hand, ev.onsetQl, -0.25)">◀</button>
+                  <span class="editor-beat">{{ beatLabel(ev.onsetQl) }}</span>
+                  <button class="mini" :disabled="updating" :title="msg.moveLater"
+                          @click="moveEvent(hand, ev.onsetQl, 0.25)">▶</button>
+                  <button class="mini" :disabled="updating" :title="msg.insertSilence"
+                          @click="insertSilence(ev.onsetQl)">⏸+</button>
+                  <button class="mini" :disabled="updating || silenceGapBefore(qnotes, ev.onsetQl) <= 1e-9"
+                          :title="msg.deleteSilence" @click="deleteSilence(ev.onsetQl)">⏸−</button>
                 </span>
-                <select class="editor-add-pitch" :disabled="updating" @change="onAddPitch(hand, ev.onsetQl, $event)">
-                  <option value="">{{ msg.addPitch }}</option>
-                  <option v-for="p in pitchOptions" :key="p" :value="p">{{ midiName(p) }}</option>
-                </select>
-                <button class="mini danger" :disabled="updating" :title="msg.deleteChord"
-                        @click="deleteEvent(hand, ev.onsetQl)">🗑</button>
-                <button class="mini" :disabled="updating" :title="msg.insertSilence"
-                        @click="insertSilence(ev.onsetQl)">⏸+</button>
-                <button class="mini" :disabled="updating || silenceGapBefore(qnotes, ev.onsetQl) <= 1e-9"
-                        :title="msg.deleteSilence" @click="deleteSilence(ev.onsetQl)">⏸−</button>
+                <span class="cluster-divider"></span>
+                <span class="editor-cluster">
+                  <select :value="ev.durQl" :disabled="updating"
+                          @change="setEventDuration(hand, ev.onsetQl, Number($event.target.value))">
+                    <option v-for="d in durOptionsFor(ev.durQl)" :key="d" :value="d">{{ durationLabel(d) }}</option>
+                  </select>
+                  <span class="editor-pitches">
+                    <span class="pitch-chip" v-for="p in ev.pitches" :key="p">
+                      {{ midiName(p) }}
+                      <button class="chip-x" :disabled="updating" @click="removePitch(hand, ev.onsetQl, p)">×</button>
+                    </span>
+                  </span>
+                  <select class="editor-add-pitch" :disabled="updating" @change="onAddPitch(hand, ev.onsetQl, $event)">
+                    <option value="">{{ msg.addPitch }}</option>
+                    <option v-for="p in pitchOptions" :key="p" :value="p">{{ midiName(p) }}</option>
+                  </select>
+                </span>
+                <span class="cluster-divider"></span>
+                <span class="editor-cluster">
+                  <button class="mini danger" :disabled="updating" :title="msg.deleteChord"
+                          @click="deleteEvent(hand, ev.onsetQl)">🗑</button>
+                </span>
               </div>
             </div>
             <button class="btn secondary small" :disabled="updating" @click="addEvent(hand)">{{ msg.addChord }}</button>

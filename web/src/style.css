@@ -217,7 +217,10 @@ input[type=file] { display: none; }
 }
 .editor-event { padding: .45rem 0; border-bottom: 1px solid var(--border); }
 .editor-event:last-of-type { border-bottom: none; }
-.editor-event-row { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+.editor-event-row { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.editor-cluster { display: flex; align-items: center; gap: .3rem; flex-wrap: wrap; }
+.cluster-divider { width: 1px; align-self: stretch; background: var(--border); flex: 0 0 auto; }
+@media (max-width: 480px) { .cluster-divider { display: none; } }
 .editor-beat { font-variant-numeric: tabular-nums; font-size: .8rem; color: var(--muted); min-width: 2.4em; text-align: center; }
 .mini {
   width: 26px; height: 26px; flex: 0 0 auto; border-radius: 8px; border: 1px solid var(--border);
