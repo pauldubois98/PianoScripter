@@ -235,6 +235,37 @@ export function mergeBarlineSlivers(qnotes, threshold) {
   return qnotes;
 }
 
+/**
+ * Latest (onset + duration) among qnotes -- of either hand -- that end
+ * strictly before `onsetQl`; 0 if nothing precedes it. Used to find the true
+ * cross-hand silence immediately before a point in the score, since the two
+ * hands share one timeline but are edited/displayed independently.
+ */
+export function lastEndBefore(qnotes, onsetQl) {
+  let end = 0;
+  for (const q of qnotes) {
+    if (q.onsetQl < onsetQl - 1e-9) end = Math.max(end, q.onsetQl + q.durQl);
+  }
+  return end;
+}
+
+/** True silence gap (both hands) immediately before `onsetQl`, >= 0. Note a
+ * note from the *other* hand can still be sounding through `onsetQl` -- in
+ * that case the gap is 0, since there's no true silence there to remove. */
+export function silenceGapBefore(qnotes, onsetQl) {
+  return Math.max(0, onsetQl - lastEndBefore(qnotes, onsetQl));
+}
+
+/** Shifts every qnote (either hand) at or after `onsetQl` by `deltaQl`,
+ * mutating in place. Notes already sounding through `onsetQl` are left
+ * untouched -- inserting silence delays what hasn't started yet, it doesn't
+ * cut off what's already playing. */
+export function shiftFrom(qnotes, onsetQl, deltaQl) {
+  for (const q of qnotes) {
+    if (q.onsetQl >= onsetQl - 1e-9) q.onsetQl += deltaQl;
+  }
+}
+
 const CHORD_ONSET_TOL = 0.03; // seconds: onsets this close are one attack, not two
 
 /**

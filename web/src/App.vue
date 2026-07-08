@@ -7,7 +7,15 @@ import { estimateTempo } from "./audio/tempo.js";
 import { MicCapture } from "./audio/mic.js";
 import { transcribeAudio, renderScore, elementsAtTime } from "./engine/engine.js";
 import { LiveSession } from "./engine/live.js";
-import { quantize, quantizeAdaptive, DEFAULT_AGGRESSIVENESS, MIN_QL, MAX_QL } from "./engine/quantize.js";
+import {
+  quantize,
+  quantizeAdaptive,
+  DEFAULT_AGGRESSIVENESS,
+  MIN_QL,
+  MAX_QL,
+  silenceGapBefore,
+  shiftFrom,
+} from "./engine/quantize.js";
 import { buildMusicXml, midiName, durationLabel, ALLOWED_DURATIONS } from "./engine/musicxml.js";
 import { buildMidi } from "./engine/midi.js";
 import { encodeWav16 } from "./audio/wav.js";
@@ -18,6 +26,9 @@ const EFFORT_ICONS = { ultra: "🚀", oaf: "🎶", fast: "⚡", balanced: "⚖�
 const LIVE_EFFORTS = ["ultra", "oaf"];
 // recommended reprocess target once a live recording stops
 const RECOMMENDED_REPROCESS_EFFORT = "balanced";
+// silence insert/delete nudge in the note editor: one beat per click, like
+// moveEvent's fixed nudge
+const SILENCE_STEP_QL = 1;
 
 export default {
   data() {
@@ -328,6 +339,7 @@ export default {
     },
     midiName,
     durationLabel,
+    silenceGapBefore,
     beatLabel(onsetQl) {
       const measure = Math.floor(onsetQl / 4) + 1;
       const beat = (onsetQl % 4) + 1;
@@ -410,6 +422,18 @@ export default {
         const onsetQl = handNotes.length ? Math.max(...handNotes.map((q) => q.onsetQl + q.durQl)) : 0;
         this.qnotes.push({ id: 0, hand, onsetQl, durQl: 1, pitch: hand === "R" ? 60 : 48, velocity: 80 });
       });
+    },
+    // Both hands share one timeline, so inserting/removing silence at a
+    // point shifts every note (either hand) at/after it, keeping the hands
+    // in sync with each other -- a note already sounding through the pivot
+    // is left untouched.
+    insertSilence(onsetQl) {
+      this.editNotes(() => shiftFrom(this.qnotes, onsetQl, SILENCE_STEP_QL));
+    },
+    deleteSilence(onsetQl) {
+      const gap = silenceGapBefore(this.qnotes, onsetQl);
+      if (gap <= 1e-9) return;
+      this.editNotes(() => shiftFrom(this.qnotes, onsetQl, -Math.min(SILENCE_STEP_QL, gap)));
     },
 
     // ---- downloads (generated locally, on demand) ----
@@ -943,6 +967,10 @@ export default {
                 </select>
                 <button class="mini danger" :disabled="updating" :title="msg.deleteChord"
                         @click="deleteEvent(hand, ev.onsetQl)">🗑</button>
+                <button class="mini" :disabled="updating" :title="msg.insertSilence"
+                        @click="insertSilence(ev.onsetQl)">⏸+</button>
+                <button class="mini" :disabled="updating || silenceGapBefore(qnotes, ev.onsetQl) <= 1e-9"
+                        :title="msg.deleteSilence" @click="deleteSilence(ev.onsetQl)">⏸−</button>
               </div>
             </div>
             <button class="btn secondary small" :disabled="updating" @click="addEvent(hand)">{{ msg.addChord }}</button>
